@@ -83,15 +83,15 @@ public class MessageLogListener extends ListenerAdapter {
                 formatAttachments(event.getMessage())
         ));
 
-        sendLog(event.getGuild(), cfg.getChannelId(), new EmbedBuilder()
+        sendLog(event.getGuild(), resolveMessageLogChannelId(event.getGuild(), cfg), new EmbedBuilder()
                 .setColor(new Color(241, 196, 15))
-                .setTitle(isZhTw(lang) ? "訊息已編輯" : "Message Edited")
+                .setTitle(isZhTw(lang) ? "訊息編輯紀錄" : "Message Edited")
                 .addField(isZhTw(lang) ? "使用者" : "User", event.getAuthor().getAsMention() + " (`" + event.getAuthor().getAsTag() + "`)", false)
                 .addField(isZhTw(lang) ? "頻道" : "Channel", "<#" + event.getChannel().getId() + ">", true)
                 .addField(isZhTw(lang) ? "訊息 ID" : "Message ID", event.getMessageId(), true)
-                .addField(isZhTw(lang) ? "修改前" : "Before", before, false)
+                .addField(isZhTw(lang) ? "修改前內容" : "Before", before, false)
                 .addField(isZhTw(lang) ? "修改前附件" : "Before Attachments", beforeAttachments, false)
-                .addField(isZhTw(lang) ? "修改後" : "After", after, false)
+                .addField(isZhTw(lang) ? "修改後內容" : "After", after, false)
                 .addField(isZhTw(lang) ? "修改後附件" : "After Attachments", afterAttachments, false)
                 .setTimestamp(Instant.now())
         );
@@ -121,9 +121,9 @@ public class MessageLogListener extends ListenerAdapter {
         String attachments = trim(old.attachments);
         long channelId = old.channelId;
 
-        sendLog(event.getGuild(), cfg.getChannelId(), new EmbedBuilder()
+        sendLog(event.getGuild(), resolveMessageLogChannelId(event.getGuild(), cfg), new EmbedBuilder()
                 .setColor(new Color(231, 76, 60))
-                .setTitle(isZhTw(lang) ? "訊息已刪除" : "Message Deleted")
+                .setTitle(isZhTw(lang) ? "訊息刪除紀錄" : "Message Deleted")
                 .addField(isZhTw(lang) ? "作者" : "Author", author, false)
                 .addField(isZhTw(lang) ? "頻道" : "Channel", "<#" + channelId + ">", true)
                 .addField(isZhTw(lang) ? "訊息 ID" : "Message ID", event.getMessageId(), true)
@@ -206,5 +206,13 @@ public class MessageLogListener extends ListenerAdapter {
             return text.substring(0, 1020) + "...";
         }
         return text;
+    }
+
+    private Long resolveMessageLogChannelId(Guild guild, BotConfig.MessageLogs cfg) {
+        Long channelId = cfg.getMessageLogChannelId();
+        if (channelId != null) {
+            return channelId;
+        }
+        return cfg.getChannelId();
     }
 }

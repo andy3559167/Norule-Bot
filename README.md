@@ -6,7 +6,7 @@
 - 音樂 Autoplay（自動推薦下一首）
 - 成員/語音進出通知（可模板化）
 - 訊息編輯/刪除日誌
-- 伺服器事件日誌（改名/身分組/頻道/靜音/封禁/踢出/指令）
+- 伺服器事件日誌（身分組/頻道/封禁/踢出/指令）
 - 刪除訊息指令（含確認按鈕、跨頁搜尋）
 - 私人語音包廂（自動建立/清除）
 - 多語系（預設英文、繁體中文）
@@ -66,13 +66,22 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.0.0-all.jar
 - `music`
 - `privateRoom`
 
-`messageLogs` 新增欄位（功能開關預設 `true`，頻道 ID 預設空）：
-- `roleLogChannelId`
-- `moderationLogChannelId`
+`messageLogs` 主要欄位（功能開關預設 `true`，頻道 ID 預設空）：
+- `channelId`（預設日誌頻道）
+- `commandUsageChannelId`（指令使用日誌獨立頻道，可不設）
+- `channelLifecycleChannelId`（頻道建立/刪除日誌獨立頻道，可不設）
+- `roleLogChannelId`（身分組變更日誌獨立頻道，可不設）
+- `moderationLogChannelId`（封禁/踢出日誌獨立頻道，可不設）
 - `roleLogEnabled`
 - `channelLifecycleLogEnabled`
 - `moderationLogEnabled`
 - `commandUsageLogEnabled`
+
+`privateRoom` 主要欄位：
+- `enabled`
+- `triggerVoiceChannelId`
+- `userLimit`
+- 包廂分類會自動跟隨「觸發語音頻道」的父分類，不需要 `categoryId` 設定
 
 預設行為：
 - module 相關功能預設為啟用
@@ -102,9 +111,9 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.0.0-all.jar
 - `!repeat <off|single|all>`
 
 ## 4.2 刪除訊息
-- `/刪除訊息 channel channel:<頻道> amount:<1-99(可省略)>`
-- `/刪除訊息 user user:<使用者> amount:<1-99(可省略)>`
-- `/delete-messages ...`（英文別名）
+- `/delete-messages channel channel:<頻道> amount:<1-99(可省略)>`
+- `/delete-messages user user:<使用者> amount:<1-99(可省略)>`
+- `/刪除訊息 ...`（中文別名）
 
 特性：
 - 送出後會先顯示「確認/取消」按鈕，避免誤刪
@@ -117,29 +126,34 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.0.0-all.jar
 - `/settings reload`
 - `/settings language code:<en|zh-TW>`
 
-`template` 子群組：
-- `/settings template member-join`
-- `/settings template member-leave`
-- `/settings template voice-join`
-- `/settings template voice-leave`
-- `/settings template voice-move`
+`template` 子指令：
+- `/settings template`（開啟下拉選單）
+- 在下拉選單選擇：`member-join / member-leave / voice-join / voice-leave / voice-move`
+- 選擇後會彈出表單編輯模板
 
-`logs` 子群組：
-- `/settings logs member-channel channel:<文字頻道>`
-- `/settings logs voice-channel channel:<文字頻道>`
-- `/settings logs messages-channel channel:<文字頻道>`
-- `/settings logs command-usage-channel channel:<文字頻道>`（指令使用紀錄專用）
-- `/settings logs channel-events-channel channel:<文字頻道>`（頻道建立/刪除日誌專用）
-- `/settings logs role-events-channel channel:<文字頻道>`（身分組變更日誌專用）
-- `/settings logs moderation-channel channel:<文字頻道>`（封禁/踢出管理日誌專用）
+`logs` 子指令：
+- `/settings logs`（先開選單，再選要設定的日誌類型，接著用頻道選擇器挑文字頻道）
+- 可設定項目：`default-channel（預設日誌頻道） / messages-channel（訊息編輯/刪除日誌） / member-channel / voice-channel / command-usage-channel / channel-events-channel / role-events-channel / moderation-channel`
+- `member-channel` 會先出現子選單：
+  - `進入/離開 在同一個頻道`：設定同一個文字頻道
+  - `進入/離開 不在同一個頻道`：再選擇要設定「加入」或「離開」通知頻道，各自指定文字頻道
+- 身分組變更、頻道建立/刪除、封禁/踢出、指令使用日誌都可獨立設定頻道（可選）
+- `default-channel` 僅作為預設 fallback 頻道，不綁定特定日誌類型
+- 若獨立頻道未設定，會自動回退到 `default-channel`（預設日誌頻道）
+- 若成員進出通知頻道/語音通知頻道未設定，也會回退到 `default-channel`
+- 啟用日誌模組前，需先設定 `default-channel`
 
-`music` 子群組：
-- `/settings music auto-leave-enabled value:<true|false>`
-- `/settings music auto-leave-minutes minutes:<1-60>`
-- `/settings music autoplay-enabled value:<true|false>`
-- `/settings music command-channel channel:<文字頻道>`
-- `/settings music private-room-channel channel:<語音頻道>`
-- `/private-room-settings`（下拉選單：上鎖頻道 / 設定人數 / 更改頻道名稱）
+`music` 子指令：
+- `/settings music`（開啟下拉選單）
+- 選單項目：
+  - `自動離開啟用`（切換開關）
+  - `自動離開分鐘`（表單輸入 1-60）
+  - `Autoplay 推薦啟用`（切換開關）
+  - `音樂指令頻道`（選擇文字頻道）
+  - `私人包廂觸發頻道`（選擇語音/Stage 頻道）
+- 設定 `私人包廂觸發頻道` 時，系統會自動啟用私人包廂模組（避免已設頻道但功能關閉）
+- `/private-room-settings` 或 `/包廂設定`（下拉選單：上鎖頻道 / 設定人數 / 更改頻道名稱）
+- `設定人數`、`更改頻道名稱` 送出後，會直接刷新同一個「包廂設定面板」與選單（可連續操作）
 - `/settings reset`（下拉選單：重設語言 / 通知 / 日誌 / 音樂 / 私人包廂 / 全部）
 
 補充：
@@ -159,15 +173,26 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.0.0-all.jar
 - 身分組變更日誌
 - 頻道建立/刪除日誌
 - 封禁/踢出管理日誌
-- Bot 指令使用日誌
+- 指令使用日誌
 
-`module` 子群組：
-- `/settings module log-enabled value:<true|false>`
-- `/settings module private-room-enabled value:<true|false>`
-- `/settings module voice-log value:<true|false>`
-- `/settings module message-log value:<true|false>`
-- `/settings module member-leave value:<true|false>`
-- `/settings module member-join value:<true|false>`
+`module` 子指令：
+- `/settings module`（開啟下拉選單）
+- 可切換項目（對應 config 主要開關）：
+  - `通知啟用 (notifications.enabled)`
+  - `訊息日誌啟用 (messageLogs.enabled)`
+  - `成員加入通知`
+  - `成員離開通知`
+  - `語音日誌`
+  - `指令使用日誌`
+  - `頻道建立/刪除日誌`
+  - `身分組變更日誌`
+  - `封禁/踢出管理日誌`
+  - `音樂自動離開啟用 (music.autoLeaveEnabled)`
+  - `音樂 Autoplay 啟用 (music.autoplayEnabled)`
+  - `私人包廂啟用 (privateRoom.enabled)`
+- 顯示格式統一為：
+  - `⚙️ 項目名稱`
+  - `> 狀態: 開啟✅ / 關閉❌`
 
 補充：
 - `/settings info` 已改為下拉式分頁面板，可切換 `總覽 / 通知 / 模板 / 日誌 / 音樂 / 私人包廂 / 模組`。
@@ -181,6 +206,13 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.0.0-all.jar
 - 選單顯示：來源、歌曲長度、作者
 - 選單 30 秒後自動失效
 - 失效後會提示使用者重新執行 `/play`
+
+## 5.1 音樂控制面板顯示
+
+- 面板上方摘要現在使用：
+  - `頻道`：會顯示機器人目前所在語音頻道的「頻道標記」（例如 `<#123...>`）
+  - `列隊`：顯示當前待播數量
+- 面板下方 `列隊` 欄位會顯示前幾首待播歌曲清單
 
 ---
 
@@ -203,9 +235,9 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.0.0-all.jar
 ## 7. 私人包廂行為
 
 啟用後，使用者加入觸發語音頻道時會：
-- 自動建立「(使用者ID) 的包廂」語音頻道
+- 自動建立「(使用者名稱) 的包廂」語音頻道
 - 給該使用者管理該頻道所需權限
-- 可透過 `/private-room-settings` 即時上鎖、改人數、改名稱
+- 可透過 `/private-room-settings` 或 `/包廂設定` 即時上鎖、改人數、改名稱
 - 該包廂無人時自動刪除
 
 ---
@@ -214,7 +246,7 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.0.0-all.jar
 
 敏感操作都已加上權限檢查：
 - `/settings ...` 需要 `MANAGE_SERVER`
-- `/刪除訊息` / `/delete-messages` 需要 `MESSAGE_MANAGE`
+- `/delete-messages` / `/刪除訊息` 需要 `MESSAGE_MANAGE`
 
 建議 Bot 本身至少具備：
 - `View Channels`
@@ -240,5 +272,3 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.0.0-all.jar
 
 - [隱私權政策](./隱私權政策.md)
 - [服務條款](./服務條款.md)
-
-

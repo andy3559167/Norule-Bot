@@ -7,8 +7,8 @@ target/
 *.iml
 
 # Runtime data
-guild-configs/
-lang/
+/guild-configs/
+/lang/
 
 # Local config/secrets
 config.yml
@@ -16,3 +16,6 @@ config.yml
 # OS
 .DS_Store
 Thumbs.db
+
+# igrone
+index.md

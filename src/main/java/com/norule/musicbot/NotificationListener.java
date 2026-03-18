@@ -95,7 +95,10 @@ public class NotificationListener extends ListenerAdapter {
     }
 
     private void sendMemberMessage(Guild guild, BotConfig.Notifications config, String message, int color, User user, boolean joinEvent) {
-        Long channelId = config.getMemberChannelId();
+        Long channelId = resolveMemberChannelId(config, joinEvent);
+        if (channelId == null) {
+            channelId = guildSettingsService.getMessageLogs(guild.getIdLong()).getChannelId();
+        }
         if (channelId == null || message == null || message.isBlank()) {
             return;
         }
@@ -113,7 +116,7 @@ public class NotificationListener extends ListenerAdapter {
                             : (isZhTw(lang) ? "成員離開通知" : "Member Left"))
                     .setDescription(message)
                     .addField(isZhTw(lang) ? "使用者" : "User", user.getAsMention() + " (`" + user.getAsTag() + "`)", false)
-                    .addField(isZhTw(lang) ? "ID" : "ID", user.getId(), true)
+                    .addField("ID", user.getId(), true)
                     .addField(isZhTw(lang) ? "帳號建立時間" : "Account Created", discordCreatedAt(createdAt), true)
                     .addField(
                             joinEvent
@@ -127,8 +130,21 @@ public class NotificationListener extends ListenerAdapter {
         }
     }
 
+    private Long resolveMemberChannelId(BotConfig.Notifications config, boolean joinEvent) {
+        if (joinEvent && config.getMemberJoinChannelId() != null) {
+            return config.getMemberJoinChannelId();
+        }
+        if (!joinEvent && config.getMemberLeaveChannelId() != null) {
+            return config.getMemberLeaveChannelId();
+        }
+        return config.getMemberChannelId();
+    }
+
     private void sendVoiceMessage(Guild guild, BotConfig.Notifications config, String message) {
         Long channelId = config.getVoiceChannelId();
+        if (channelId == null) {
+            channelId = guildSettingsService.getMessageLogs(guild.getIdLong()).getChannelId();
+        }
         if (channelId == null || message == null || message.isBlank()) {
             return;
         }
@@ -168,13 +184,13 @@ public class NotificationListener extends ListenerAdapter {
         BotConfig.Notifications defaults = BotConfig.Notifications.defaultValues();
         return switch (type) {
             case "join" -> template.equals(defaults.getVoiceJoinMessage())
-                    ? "{user} 加入了語音頻道 {channel}。"
+                    ? "{user} 加入語音頻道 {channel}。"
                     : template;
             case "leave" -> template.equals(defaults.getVoiceLeaveMessage())
-                    ? "{user} 離開了語音頻道 {channel}。"
+                    ? "{user} 離開語音頻道 {channel}。"
                     : template;
             case "move" -> template.equals(defaults.getVoiceMoveMessage())
-                    ? "{user} 從語音頻道 {from} 移動到 {to}。"
+                    ? "{user} 從 {from} 移動到 {to}。"
                     : template;
             default -> template;
         };
@@ -187,12 +203,12 @@ public class NotificationListener extends ListenerAdapter {
         BotConfig.Notifications defaults = BotConfig.Notifications.defaultValues();
         if (join) {
             if (template.equals(defaults.getMemberJoinMessage())) {
-                return "{user} 加入了伺服器。帳號建立時間：{createdAt}。ID：{id}";
+                return "{user} 加入了伺服器。帳號建立：{createdAt}。ID：{id}";
             }
             return template;
         }
         if (template.equals(defaults.getMemberLeaveMessage())) {
-            return "{user} 離開了伺服器。帳號建立時間：{createdAt}。ID：{id}";
+            return "{user} 離開了伺服器。帳號建立：{createdAt}。ID：{id}";
         }
         return template;
     }

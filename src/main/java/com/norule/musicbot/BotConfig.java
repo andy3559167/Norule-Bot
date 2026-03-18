@@ -341,6 +341,8 @@ public class BotConfig {
         private final boolean memberLeaveEnabled;
         private final boolean voiceLogEnabled;
         private final Long memberChannelId;
+        private final Long memberJoinChannelId;
+        private final Long memberLeaveChannelId;
         private final String memberJoinMessage;
         private final String memberLeaveMessage;
         private final int memberJoinColor;
@@ -355,6 +357,8 @@ public class BotConfig {
                               boolean memberLeaveEnabled,
                               boolean voiceLogEnabled,
                               Long memberChannelId,
+                              Long memberJoinChannelId,
+                              Long memberLeaveChannelId,
                               String memberJoinMessage,
                               String memberLeaveMessage,
                               int memberJoinColor,
@@ -368,6 +372,8 @@ public class BotConfig {
             this.memberLeaveEnabled = memberLeaveEnabled;
             this.voiceLogEnabled = voiceLogEnabled;
             this.memberChannelId = memberChannelId;
+            this.memberJoinChannelId = memberJoinChannelId;
+            this.memberLeaveChannelId = memberLeaveChannelId;
             this.memberJoinMessage = memberJoinMessage;
             this.memberLeaveMessage = memberLeaveMessage;
             this.memberJoinColor = memberJoinColor;
@@ -386,6 +392,8 @@ public class BotConfig {
                     getBoolean(map, "memberLeaveEnabled", defaults.isMemberLeaveEnabled()),
                     getBoolean(map, "voiceLogEnabled", defaults.isVoiceLogEnabled()),
                     getLong(map, "memberChannelId", defaults.getMemberChannelId()),
+                    getLong(map, "memberJoinChannelId", defaults.getMemberJoinChannelId()),
+                    getLong(map, "memberLeaveChannelId", defaults.getMemberLeaveChannelId()),
                     getString(map, "memberJoinMessage", defaults.getMemberJoinMessage()),
                     getString(map, "memberLeaveMessage", defaults.getMemberLeaveMessage()),
                     getColor(map, "memberJoinColor", defaults.getMemberJoinColor()),
@@ -404,6 +412,8 @@ public class BotConfig {
                     true,
                     true,
                     null,
+                    null,
+                    null,
                     "{user} joined the server. Account created: {createdAt} ({accountAgeDays} days ago). ID: {id}",
                     "{user} left the server. Account created: {createdAt} ({accountAgeDays} days ago). ID: {id}",
                     0x2ECC71,
@@ -416,67 +426,77 @@ public class BotConfig {
         }
 
         public Notifications withEnabled(boolean enabled) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withMemberJoinEnabled(boolean memberJoinEnabled) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withMemberLeaveEnabled(boolean memberLeaveEnabled) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withVoiceLogEnabled(boolean voiceLogEnabled) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withMemberChannelId(Long memberChannelId) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+                    voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
+        }
+
+        public Notifications withMemberJoinChannelId(Long memberJoinChannelId) {
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+                    voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
+        }
+
+        public Notifications withMemberLeaveChannelId(Long memberLeaveChannelId) {
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withVoiceChannelId(Long voiceChannelId) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withMemberJoinMessage(String memberJoinMessage) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withMemberLeaveMessage(String memberLeaveMessage) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withVoiceJoinMessage(String voiceJoinMessage) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withVoiceLeaveMessage(String voiceLeaveMessage) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withVoiceMoveMessage(String voiceMoveMessage) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withMemberJoinColor(int memberJoinColor) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, normalizeColor(memberJoinColor), memberLeaveColor, voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, normalizeColor(memberJoinColor), memberLeaveColor, voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
         public Notifications withMemberLeaveColor(int memberLeaveColor) {
-            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, normalizeColor(memberLeaveColor), voiceChannelId,
+            return new Notifications(enabled, memberJoinEnabled, memberLeaveEnabled, voiceLogEnabled, memberChannelId, memberJoinChannelId, memberLeaveChannelId, memberJoinMessage, memberLeaveMessage, memberJoinColor, normalizeColor(memberLeaveColor), voiceChannelId,
                     voiceJoinMessage, voiceLeaveMessage, voiceMoveMessage);
         }
 
@@ -498,6 +518,14 @@ public class BotConfig {
 
         public Long getMemberChannelId() {
             return memberChannelId;
+        }
+
+        public Long getMemberJoinChannelId() {
+            return memberJoinChannelId;
+        }
+
+        public Long getMemberLeaveChannelId() {
+            return memberLeaveChannelId;
         }
 
         public String getMemberJoinMessage() {
@@ -540,6 +568,7 @@ public class BotConfig {
     public static class MessageLogs {
         private final boolean enabled;
         private final Long channelId;
+        private final Long messageLogChannelId;
         private final Long commandUsageChannelId;
         private final Long channelLifecycleChannelId;
         private final Long roleLogChannelId;
@@ -551,6 +580,7 @@ public class BotConfig {
 
         private MessageLogs(boolean enabled,
                             Long channelId,
+                            Long messageLogChannelId,
                             Long commandUsageChannelId,
                             Long channelLifecycleChannelId,
                             Long roleLogChannelId,
@@ -561,6 +591,7 @@ public class BotConfig {
                             boolean commandUsageLogEnabled) {
             this.enabled = enabled;
             this.channelId = channelId;
+            this.messageLogChannelId = messageLogChannelId;
             this.commandUsageChannelId = commandUsageChannelId;
             this.channelLifecycleChannelId = channelLifecycleChannelId;
             this.roleLogChannelId = roleLogChannelId;
@@ -576,6 +607,7 @@ public class BotConfig {
             return new MessageLogs(
                     getBoolean(map, "enabled", defaults.isEnabled()),
                     getLong(map, "channelId", defaults.getChannelId()),
+                    getLong(map, "messageLogChannelId", defaults.getMessageLogChannelId()),
                     getLong(map, "commandUsageChannelId", defaults.getCommandUsageChannelId()),
                     getLong(map, "channelLifecycleChannelId", defaults.getChannelLifecycleChannelId()),
                     getLong(map, "roleLogChannelId", defaults.getRoleLogChannelId()),
@@ -588,47 +620,51 @@ public class BotConfig {
         }
 
         public static MessageLogs defaultValues() {
-            return new MessageLogs(true, null, null, null, null, null, true, true, true, true);
+            return new MessageLogs(true, null, null, null, null, null, null, true, true, true, true);
         }
 
         public MessageLogs withEnabled(boolean enabled) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
         }
 
         public MessageLogs withChannelId(Long channelId) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
+        }
+
+        public MessageLogs withMessageLogChannelId(Long messageLogChannelId) {
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
         }
 
         public MessageLogs withCommandUsageChannelId(Long commandUsageChannelId) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
         }
 
         public MessageLogs withChannelLifecycleChannelId(Long channelLifecycleChannelId) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
         }
 
         public MessageLogs withRoleLogChannelId(Long roleLogChannelId) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
         }
 
         public MessageLogs withModerationLogChannelId(Long moderationLogChannelId) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
         }
 
         public MessageLogs withRoleLogEnabled(boolean value) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, value, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, value, channelLifecycleLogEnabled, moderationLogEnabled, commandUsageLogEnabled);
         }
 
         public MessageLogs withChannelLifecycleLogEnabled(boolean value) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, value, moderationLogEnabled, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, value, moderationLogEnabled, commandUsageLogEnabled);
         }
 
         public MessageLogs withModerationLogEnabled(boolean value) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, value, commandUsageLogEnabled);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, value, commandUsageLogEnabled);
         }
 
         public MessageLogs withCommandUsageLogEnabled(boolean value) {
-            return new MessageLogs(enabled, channelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, value);
+            return new MessageLogs(enabled, channelId, messageLogChannelId, commandUsageChannelId, channelLifecycleChannelId, roleLogChannelId, moderationLogChannelId, roleLogEnabled, channelLifecycleLogEnabled, moderationLogEnabled, value);
         }
 
         public boolean isEnabled() {
@@ -637,6 +673,10 @@ public class BotConfig {
 
         public Long getChannelId() {
             return channelId;
+        }
+
+        public Long getMessageLogChannelId() {
+            return messageLogChannelId;
         }
 
         public Long getCommandUsageChannelId() {
@@ -758,13 +798,11 @@ public class BotConfig {
     public static class PrivateRoom {
         private final boolean enabled;
         private final Long triggerVoiceChannelId;
-        private final Long categoryId;
         private final int userLimit;
 
-        private PrivateRoom(boolean enabled, Long triggerVoiceChannelId, Long categoryId, int userLimit) {
+        private PrivateRoom(boolean enabled, Long triggerVoiceChannelId, int userLimit) {
             this.enabled = enabled;
             this.triggerVoiceChannelId = triggerVoiceChannelId;
-            this.categoryId = categoryId;
             this.userLimit = userLimit;
         }
 
@@ -773,29 +811,24 @@ public class BotConfig {
             return new PrivateRoom(
                     getBoolean(map, "enabled", defaults.isEnabled()),
                     getLong(map, "triggerVoiceChannelId", defaults.getTriggerVoiceChannelId()),
-                    getLong(map, "categoryId", defaults.getCategoryId()),
                     Math.max(0, getInt(map, "userLimit", defaults.getUserLimit()))
             );
         }
 
         public static PrivateRoom defaultValues() {
-            return new PrivateRoom(true, null, null, 0);
+            return new PrivateRoom(true, null, 0);
         }
 
         public PrivateRoom withEnabled(boolean enabled) {
-            return new PrivateRoom(enabled, triggerVoiceChannelId, categoryId, userLimit);
+            return new PrivateRoom(enabled, triggerVoiceChannelId, userLimit);
         }
 
         public PrivateRoom withTriggerVoiceChannelId(Long triggerVoiceChannelId) {
-            return new PrivateRoom(enabled, triggerVoiceChannelId, categoryId, userLimit);
-        }
-
-        public PrivateRoom withCategoryId(Long categoryId) {
-            return new PrivateRoom(enabled, triggerVoiceChannelId, categoryId, userLimit);
+            return new PrivateRoom(enabled, triggerVoiceChannelId, userLimit);
         }
 
         public PrivateRoom withUserLimit(int userLimit) {
-            return new PrivateRoom(enabled, triggerVoiceChannelId, categoryId, Math.max(0, userLimit));
+            return new PrivateRoom(enabled, triggerVoiceChannelId, Math.max(0, userLimit));
         }
 
         public boolean isEnabled() {
@@ -804,10 +837,6 @@ public class BotConfig {
 
         public Long getTriggerVoiceChannelId() {
             return triggerVoiceChannelId;
-        }
-
-        public Long getCategoryId() {
-            return categoryId;
         }
 
         public int getUserLimit() {
@@ -971,74 +1000,36 @@ public class BotConfig {
 
     private static Map<String, String> defaultCommandDescriptions() {
         Map<String, String> map = new LinkedHashMap<>();
-        map.put("help", "顯示機器人說明");
-        map.put("join", "讓機器人加入你的語音頻道");
-        map.put("play", "播放音樂（關鍵字或連結）");
-        map.put("play.query", "輸入關鍵字、YouTube 或 Spotify 連結");
-        map.put("skip", "跳過目前歌曲");
-        map.put("stop", "停止播放並清空佇列");
-        map.put("leave", "讓機器人離開語音頻道");
-        map.put("music-panel", "建立音樂控制面板");
-        map.put("repeat", "設定循環模式");
+        map.put("help", "Show bot help");
+        map.put("join", "Join your voice channel");
+        map.put("play", "Play music");
+        map.put("play.query", "URL / keywords / Spotify URL");
+        map.put("skip", "Skip current track");
+        map.put("stop", "Stop playback and clear queue");
+        map.put("leave", "Leave voice channel");
+        map.put("music-panel", "Create music control panel");
+        map.put("repeat", "Set repeat mode");
         map.put("repeat.mode", "off / single / all");
-        map.put("delete", "刪除訊息");
-        map.put("delete.channel", "刪除指定頻道的訊息");
-        map.put("delete.channel.channel", "選擇文字頻道");
-        map.put("delete.channel.amount", "刪除數量 1-99（可省略）");
-        map.put("delete.user", "刪除指定使用者的訊息");
-        map.put("delete.user.user", "選擇使用者");
-        map.put("delete.user.amount", "刪除數量 1-99（可省略）");
+        map.put("delete", "Delete messages");
+        map.put("delete.channel", "Delete messages in selected channel");
+        map.put("delete.channel.channel", "Text channel");
+        map.put("delete.channel.amount", "1-99");
+        map.put("delete.user", "Delete messages by selected user");
+        map.put("delete.user.user", "Target user");
+        map.put("delete.user.amount", "1-99");
         map.put("delete-en", "Delete messages");
-        map.put("settings", "伺服器設定");
-        map.put("settings.info", "查看目前伺服器設定");
-        map.put("settings.reload", "重新載入伺服器設定");
-        map.put("settings.language", "設定語言");
-        map.put("settings.language.code", "語言代碼（en 或 zh-TW）");
-        map.put("settings.group.template", "通知模板設定");
-        map.put("settings.template.voice-join", "設定語音加入模板");
-        map.put("settings.template.voice-leave", "設定語音離開模板");
-        map.put("settings.template.voice-move", "設定語音移動模板");
-        map.put("settings.template.member-leave", "設定成員離開模板");
-        map.put("settings.template.member-join", "設定成員加入模板");
-        map.put("settings.group.logs", "通知與日誌頻道設定");
-        map.put("settings.logs.member-channel", "設定成員通知頻道");
-        map.put("settings.logs.member-channel.channel", "選擇文字頻道");
-        map.put("settings.logs.voice-channel", "設定語音通知頻道");
-        map.put("settings.logs.voice-channel.channel", "選擇文字頻道");
-        map.put("settings.logs.messages-channel", "設定訊息日誌頻道");
-        map.put("settings.logs.messages-channel.channel", "選擇文字頻道");
-        map.put("settings.logs.command-usage-channel", "設定指令使用日誌頻道");
-        map.put("settings.logs.command-usage-channel.channel", "選擇文字頻道");
-        map.put("settings.logs.channel-events-channel", "設定頻道事件日誌頻道");
-        map.put("settings.logs.channel-events-channel.channel", "選擇文字頻道");
-        map.put("settings.logs.role-events-channel", "設定身分組變更日誌頻道");
-        map.put("settings.logs.role-events-channel.channel", "選擇文字頻道");
-        map.put("settings.logs.moderation-channel", "設定封禁/踢出管理日誌頻道");
-        map.put("settings.logs.moderation-channel.channel", "選擇文字頻道");
-        map.put("settings.group.music", "音樂與私人包廂設定");
-        map.put("settings.music.auto-leave-enabled", "啟用或停用音樂自動離開");
-        map.put("settings.music.auto-leave-enabled.value", "true / false");
-        map.put("settings.music.auto-leave-minutes", "設定音樂自動離開分鐘數");
-        map.put("settings.music.auto-leave-minutes.minutes", "分鐘數 1-60");
-        map.put("settings.music.private-room-channel", "設定私人包廂觸發語音頻道");
-        map.put("settings.music.private-room-channel.channel", "選擇語音頻道");
-        map.put("settings.music.private-room-user-limit", "設定私人包廂人數上限");
-        map.put("settings.music.private-room-user-limit.limit", "人數上限 0-99");
-        map.put("settings.music.command-channel", "設定音樂指令專用頻道");
-        map.put("settings.music.command-channel.channel", "選擇文字頻道");
-        map.put("settings.group.module", "模組開關設定");
-        map.put("settings.module.log-enabled", "啟用或停用訊息日誌模組");
-        map.put("settings.module.log-enabled.value", "true / false");
-        map.put("settings.module.private-room-enabled", "啟用或停用私人包廂模組");
-        map.put("settings.module.private-room-enabled.value", "true / false");
-        map.put("settings.module.voice-log", "啟用或停用語音日誌");
-        map.put("settings.module.voice-log.value", "true / false");
-        map.put("settings.module.message-log", "啟用或停用訊息日誌通知");
-        map.put("settings.module.message-log.value", "true / false");
-        map.put("settings.module.member-leave", "啟用或停用成員離開通知");
-        map.put("settings.module.member-leave.value", "true / false");
-        map.put("settings.module.member-join", "啟用或停用成員加入通知");
-        map.put("settings.module.member-join.value", "true / false");
+        map.put("settings", "Guild settings");
+        map.put("settings.info", "Show current guild settings");
+        map.put("settings.reload", "Reload guild settings");
+        map.put("settings.reset", "Reset guild settings by section");
+        map.put("settings.template", "Open template edit menu");
+        map.put("settings.module", "Open module toggle menu");
+        map.put("settings.logs", "Open logs channel menu");
+        map.put("settings.music", "Open music settings menu");
+        map.put("settings.language", "Set language");
+        map.put("settings.language.code", "en or zh-TW");
+        map.put("private-room-settings", "Manage your private room");
         return map;
     }
 }
+

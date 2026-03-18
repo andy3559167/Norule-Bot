@@ -1,0 +1,372 @@
+﻿language:
+  name: "English"
+
+general:
+  only_guild: "This command can only be used in a server."
+  no_permission: "You do not have permission to use this command."
+  missing_permissions: "Missing required permissions: {permissions}"
+  unknown_command: "Unknown command."
+  command_cooldown: "Command is on cooldown. Please try again in {seconds} seconds."
+  settings_saved: "Setting updated: {key} = {value}"
+  invalid_channel: "Invalid channel."
+  invalid_user: "Invalid user."
+
+system:
+  startup: "✅ Bot started and is now online."
+  shutdown: "🛑 Bot is shutting down."
+
+music:
+  join_first: "Join a voice channel first."
+  joined: "Joined {channel}."
+  left: "Left voice channel."
+  left_by_operator: "👋 {user} used the leave button. Bot has left the voice channel."
+  auto_leave_idle_notice: "🕒 Bot left the voice channel automatically due to idle playback timeout."
+  queue_added: "Queued: `{title}`"
+  queue_empty: "Queue is empty."
+  skipped: "Skipped current track."
+  stopped: "Stopped playback and cleared queue."
+  load_failed: "Failed to load track: {error}"
+  not_found: "No track found for `{query}`"
+  search_title: "Search Results"
+  search_desc: "Select one track from top 10 results. This menu expires in {seconds} seconds."
+  search_timeout: "Search menu expired after 30 seconds."
+  search_expired: "This search menu has expired. Please run /play again."
+  panel_title: "Music Control Panel"
+  panel_current: "Now Playing"
+  panel_channel: "Channel"
+  panel_queue: "Queue"
+  panel_repeat: "Repeat"
+  panel_state: "State"
+  panel_paused: "Paused"
+  panel_playing: "Playing"
+  panel_idle: "Idle"
+  panel_source: "Source"
+  panel_requester: "Requested By"
+  panel_progress: "Progress"
+  panel_autoplay_notice: "Autoplay Notice"
+  panel_none: "(none)"
+  repeat_off: "OFF"
+  repeat_single: "SINGLE"
+  repeat_all: "ALL"
+  autoplay_on: "ON"
+  autoplay_off: "OFF"
+  autoplay_notice_no_match: "No suitable next recommendation was found."
+  autoplay_notice_load_failed: "Autoplay failed to load recommendation: {error}"
+  btn_play_pause: "Play/Pause"
+  btn_skip: "Skip"
+  btn_stop: "Stop"
+  btn_leave: "Leave"
+  btn_repeat_single: "Repeat One"
+  btn_repeat_all: "Repeat Queue"
+  btn_repeat_off: "Disable Repeat"
+  btn_autoplay_on: "Autoplay: ON"
+  btn_autoplay_off: "Autoplay: OFF"
+  panel_stale: "This music panel is outdated. Please create a new one with /music-panel."
+  command_channel_restricted: "This music command can only be used in the configured music command channel."
+  panel_same_voice_only: "Only members in the same voice channel as the bot can use this panel."
+  not_same_voice_channel: "You must join the same voice channel as the bot first."
+  join_bot_voice_channel: "The bot is currently in {channel}. Join that voice channel before using play."
+  not_connected: "The bot is not connected to any voice channel."
+
+help:
+  title: "Bot Help"
+  intro: "Welcome to NoRule bot. Use the dropdown or the category buttons below to switch help sections."
+  select_placeholder: "Choose a category"
+  category_music: "Music"
+  category_settings: "Settings"
+  category_moderation: "Moderation"
+  category_private_room: "Private Room"
+  category_general: "General"
+  content_music: |
+    🎧 Quick Start
+    `/join` Make bot join your current voice channel
+    `/play query:<keyword or URL>` Search and play a track
+    `/music-panel` Create an interactive control panel
+
+    🎮 Playback Controls
+    `/skip` Skip current track
+    `/stop` Stop playback and clear queue
+    `/leave` Make bot leave voice channel
+    `/repeat mode:<off|single|all>` Switch repeat mode
+
+    📌 Tip
+    Open `/settings music`, then set "Music Command Channel" to keep commands in one place.
+  content_settings: |
+    ⚙️ Core Management
+    `/settings info` View active guild settings
+    `/settings reload` Reload guild settings
+    `/settings language code:<en|zh-TW>` Switch language
+    `/settings reset` Open reset menu (with 2-step confirmation)
+
+    🧩 Notification Templates
+    `/settings template`
+    Use the dropdown menu to choose a template, then open the edit form
+
+    📢 Notification / Log Channels
+    `/settings logs`
+    First pick a log type from dropdown, then choose a text channel from channel selector
+
+    🎵 Music & Private Room Trigger
+    `/settings music`
+    Configure via dropdown:
+    - Auto leave toggle
+    - Auto leave minutes (1-60)
+    - Autoplay toggle
+    - Music command channel
+    - Private room trigger channel
+
+    🧱 Module Toggles
+    `/settings module`
+    Use the dropdown menu to quickly toggle each module
+
+    🏠 Private Room Quick Control
+    `/private-room-settings` to lock / set limit / rename your room
+  content_moderation: |
+    - `/delete-messages channel amount` bulk delete in a channel
+    - `/delete-messages user amount` delete by target user
+    - `/刪除訊息` is the Traditional Chinese alias
+    - Includes confirm button to prevent accidental deletion
+  content_private_room: |
+    🏠 Trigger Setup
+    `/settings music`
+    Open the music settings menu, then choose "Private Room Trigger Channel".
+
+    🛠️ Room Controls
+    `/private-room-settings`
+    Manage your own room with:
+    - Lock channel
+    - Set user limit (1-99, blank = unlimited)
+    - Rename channel (max 10 chars)
+
+    ♻️ Auto Cleanup
+    Private rooms are auto-deleted when empty.
+  content_general: |
+    - `/help` open this help panel
+    - Use `/settings language` to switch language
+  tip_title: "Quick Tip"
+  tip_body: "Click category buttons below to switch pages instantly."
+
+settings:
+  reload_done: "Guild settings reloaded."
+  language_invalid: "Unsupported language: {language}"
+  language_updated: "Language changed to {language}."
+  validation_expected_text_channel: "Please select a text channel."
+  validation_expected_voice_channel: "Please select a voice channel or stage channel."
+  validation_private_room_category_missing: "No usable category was found. Please pick a category or a channel under a category."
+  info_title: "Current Guild Settings"
+  info_desc: "Each item below shows effective value and default value."
+  info_language: "Language"
+  info_notifications: "Notification Settings"
+  info_notification_templates: "Notification Templates"
+  info_message_logs: "Message Logs"
+  info_music: "Music Settings"
+  info_private_room: "Private Room"
+  info_module: "Module"
+  info_select_placeholder: "Choose info section"
+  info_section_overview: "Overview"
+  info_channels_none: "Not set"
+  info_bool_on: "On✅"
+  info_bool_off: "Off❌"
+  info_compare_format: "{effective}\n> default: {default}"
+  info_default_prefix: "Default"
+  info_key_enabled: "Enabled"
+  info_key_member_channel: "Member Join/Leave Channel"
+  info_key_member_channel_mode: "Member Notification Channel Mode"
+  info_key_member_join_channel: "Member Join Channel (Split)"
+  info_key_member_leave_channel: "Member Leave Channel (Split)"
+  info_key_member_join_enabled: "Member Join Notify Enabled"
+  info_key_member_leave_enabled: "Member Leave Notify Enabled"
+  info_key_voice_log_enabled: "Voice Log Enabled"
+  info_key_voice_channel: "Voice Channel"
+  info_key_member_join_template: "Member Join Template"
+  info_key_member_join_color: "Member Join Embed Color"
+  info_key_member_leave_template: "Member Leave Template"
+  info_key_member_leave_color: "Member Leave Embed Color"
+  info_key_voice_join_template: "Voice Join Template"
+  info_key_voice_leave_template: "Voice Leave Template"
+  info_key_voice_move_template: "Voice Move Template"
+  info_key_log_channel: "Default Log Channel"
+  info_key_message_log_channel: "Message Edit/Delete Log Channel"
+  info_key_log_role_channel: "Role Events Log Channel"
+  info_key_log_moderation_channel: "Moderation Log Channel"
+  info_key_log_command_channel: "Command Usage Log Channel"
+  info_key_log_channel_events_channel: "Channel Events Log Channel"
+  info_key_log_role: "Role Change Log"
+  info_key_log_channel_lifecycle: "Channel Create/Delete Log"
+  info_key_log_moderation: "Moderation Log (Kick/Ban)"
+  info_key_log_command_usage: "Command Usage Log"
+  info_key_auto_leave_enabled: "Auto Leave Enabled"
+  info_key_auto_leave_minutes: "Auto Leave Minutes"
+  info_key_autoplay_enabled: "Autoplay Recommendation Enabled"
+  info_key_default_repeat_mode: "Default Repeat Mode"
+  info_key_music_command_channel: "Music Command Channel"
+  info_key_trigger_channel: "Trigger Voice Channel"
+  info_key_category: "Category"
+  info_key_category_auto: "Category (Auto from Trigger)"
+  info_key_user_limit: "User Limit"
+  key_notifications_enabled: "Notifications Enabled"
+  key_notifications_memberChannelId: "Member Join/Leave Notification Channel"
+  key_notifications_voiceChannelId: "Voice Notification Channel"
+  key_notifications_memberJoinEnabled: "Member Join Notify Enabled"
+  key_notifications_memberLeaveEnabled: "Member Leave Notify Enabled"
+  key_notifications_voiceLogEnabled: "Voice Log Enabled"
+  member_channel_mode_same: "Join/Leave in the same channel"
+  member_channel_mode_split: "Join/Leave in different channels"
+  key_messageLogs_enabled: "Message Logs Enabled"
+  key_messageLogs_channelId: "Default Log Channel"
+  key_messageLogs_messageLogChannelId: "Message Edit/Delete Log Channel"
+  key_messageLogs_roleLogChannelId: "Role Events Log Channel"
+  key_messageLogs_moderationLogChannelId: "Moderation Log Channel"
+  key_messageLogs_commandUsageChannelId: "Command Usage Log Channel"
+  key_messageLogs_channelLifecycleChannelId: "Channel Events Log Channel"
+  key_music_autoLeaveEnabled: "Music Auto Leave Enabled"
+  key_music_autoLeaveMinutes: "Music Auto Leave Minutes"
+  key_music_autoplayEnabled: "Music Autoplay Enabled"
+  key_music_commandChannelId: "Music Command Channel"
+  key_privateRoom_enabled: "Private Room Enabled"
+  key_privateRoom_triggerVoiceChannelId: "Private Room Trigger Channel"
+  key_privateRoom_userLimit: "Private Room User Limit"
+  template_modal_title: "Template Form"
+  template_modal_label: "Template Content"
+  template_modal_color_label: "Embed Color (Hex)"
+  template_menu_title: "Notification Template Settings"
+  template_menu_desc: "Choose which template to edit from the dropdown menu."
+  template_menu_placeholder: "Choose template type"
+  template_menu_expired: "Template menu expired. Run `/settings template` again."
+  template_color_invalid: "Invalid color. Use #RRGGBB or RRGGBB."
+  template_preview_title: "Template Preview"
+  template_updated: "Updated Setting"
+  module_menu_title: "Module Toggle Settings"
+  module_menu_desc: "Toggle modules from the dropdown menu. Each selection flips the current state."
+  module_menu_placeholder: "Choose module to toggle"
+  module_menu_expired: "Module menu expired. Run `/settings module` again."
+  status_label: "Status"
+  value_label: "Value"
+  logs_menu_title: "Log Channel Settings"
+  logs_menu_desc: "Pick a log type first, then choose the output text channel. If a dedicated channel is not set, the default log channel will be used."
+  logs_menu_placeholder: "Choose log type"
+  logs_menu_expired: "Logs menu expired. Run `/settings logs` again."
+  logs_menu_channel_placeholder: "Choose a text channel"
+  logs_menu_pick_channel_title: "Select Log Output Channel"
+  logs_menu_pick_channel_desc: "Choose a text channel for \"{target}\"."
+  logs_menu_status_format: "{module} | {channel}"
+  logs_menu_module_default: "Module: Default"
+  logs_member_mode_title: "Member Join/Leave Channel Mode"
+  logs_member_mode_desc: "Choose whether join/leave should use one channel, or separate channels."
+  logs_member_mode_placeholder: "Choose member channel mode"
+  logs_member_mode_shared: "Join/Leave in the same channel"
+  logs_member_mode_split: "Join/Leave in different channels"
+  logs_member_split_title: "Set Member Join/Leave Channels Separately"
+  logs_member_split_desc: "Choose whether to set join channel or leave channel."
+  logs_member_split_placeholder: "Choose target channel to set"
+  logs_member_split_join: "Set join notification channel"
+  logs_member_split_leave: "Set leave notification channel"
+  logs_menu_module_none: "Module: N/A"
+  logs_menu_module_state: "Module: {state}"
+  logs_menu_module_member_state: "Module: Join {join} / Leave {leave}"
+  logs_menu_channel_state: "Channel: {state}"
+  logs_menu_channel_member_split: "Channel: Join {join} / Leave {leave}"
+  logs_menu_channel_set: "Set"
+  logs_menu_channel_unset: "Unset"
+  logs_default_required: "Set a default log channel in `/settings logs` before enabling log modules."
+  music_menu_title: "Music Settings"
+  music_menu_desc: "Use the dropdown menu to configure music and private-room trigger settings."
+  music_menu_placeholder: "Choose a music setting to update"
+  music_menu_expired: "Music settings menu expired. Run `/settings music` again."
+  music_menu_current: "Current: {value}"
+  music_menu_pick_channel_title: "Select Music Setting Channel"
+  music_menu_pick_channel_desc: "Choose a channel for \"{target}\"."
+  music_menu_channel_placeholder: "Choose a channel"
+  music_menu_minutes_title: "Set Auto Leave Minutes"
+  music_menu_minutes_hint: "Enter a value from 1 to 60"
+  music_menu_minutes_label: "Minutes"
+  music_menu_minutes_invalid: "Minutes must be an integer between 1 and 60."
+  private_room_auto_enabled_notice: "Private room module has been auto-enabled."
+  private_room_category_deprecated: "Category is now auto-detected from trigger voice channel. No manual category setting is required."
+  reset_title: "Reset Guild Settings"
+  reset_desc: "Pick which section to reset from the dropdown menu."
+  reset_placeholder: "Choose reset target"
+  reset_option_language: "Language"
+  reset_option_notifications: "Notifications"
+  reset_option_message_logs: "Message Logs"
+  reset_option_music: "Music"
+  reset_option_private_room: "Private Room"
+  reset_option_all: "Reset All"
+  reset_target_language: "Language"
+  reset_target_notifications: "Notifications"
+  reset_target_message-logs: "Message Logs"
+  reset_target_music: "Music"
+  reset_target_private-room: "Private Room"
+  reset_target_all: "All Settings"
+  reset_done: "Reset done: {target}"
+  reset_expired: "This reset menu has expired. Please run `/settings reset` again."
+  reset_confirm_title: "Confirm Reset"
+  reset_confirm_desc: "You are about to reset: {target}\nThis will overwrite current guild settings. Continue?"
+  reset_confirm_button: "Confirm Reset"
+  reset_cancel_button: "Cancel"
+  reset_cancelled: "Reset cancelled."
+
+room_settings:
+  title: "Private Room Settings"
+  desc: "Use the dropdown to manage your current private room."
+  select_placeholder: "Choose an action"
+  option_lock: "Lock/Unlock Room"
+  option_limit: "Set User Limit"
+  option_rename: "Rename Room"
+  field_channel: "Channel"
+  field_name: "Name"
+  field_limit: "User Limit"
+  field_lock: "Locked"
+  unlimited: "Unlimited"
+  must_join_private_room: "Join your private room first before using this command."
+  expired: "This room settings menu has expired. Please run `/private-room-settings` again."
+  room_not_found: "No manageable private room was found."
+  already_locked: "This private room is already locked."
+  action_failed: "Action failed. Please check bot permissions and try again."
+  limit_title: "Set User Limit"
+  limit_label: "Enter 1-99, leave blank for unlimited"
+  limit_placeholder: "Example: 8 (blank = unlimited)"
+  limit_invalid: "User limit must be 1-99, or blank for unlimited."
+  limit_saved: "User limit updated to: {limit}"
+  rename_title: "Rename Room"
+  rename_label: "New room name (max 10 chars)"
+  rename_placeholder: "Current: {name}"
+  rename_invalid: "Name cannot be empty and must be 1-10 characters."
+  rename_saved: "Room name updated to: {name}"
+
+delete:
+  processing: "Deleting messages, please wait..."
+  confirm_title: "Delete Confirmation"
+  confirm_body: "Delete {count} messages in {scope}?"
+  confirm_warning: "Only messages newer than 14 days can be deleted."
+  confirm_button: "Confirm"
+  cancel_button: "Cancel"
+  cancelled: "Delete cancelled."
+  processed: "Deleted {count} messages."
+  no_target: "No matching messages found."
+  amount_range: "Amount must be between 1 and 99."
+  default_amount_notice: "Amount not provided. Using max deletable amount: {count}."
+  default_channel_notice: "Channel not provided. Using current channel: {channel}"
+  only_requester: "Only the original requester can use these buttons."
+  failed: "Delete failed. Please try again later."
+
+logs:
+  command_title: "🧭 Command Usage Log"
+  command_user: "User"
+  command_channel: "Channel"
+  user: "User"
+  role_added: "Roles Added"
+  role_removed: "Roles Removed"
+  roles: "Roles"
+  channel_created: "Channel Created"
+  channel_deleted: "Channel Deleted"
+  channel: "Channel"
+  user_banned: "User Banned"
+  user_unbanned: "User Unbanned"
+  user_kicked: "User Kicked"
+  target: "Target"
+  moderator: "Moderator"
+
+
+
+

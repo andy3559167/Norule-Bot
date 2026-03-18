@@ -174,6 +174,8 @@ public class GuildSettingsService {
         notificationsMap.put("memberLeaveEnabled", notifications.isMemberLeaveEnabled());
         notificationsMap.put("voiceLogEnabled", notifications.isVoiceLogEnabled());
         notificationsMap.put("memberChannelId", toText(notifications.getMemberChannelId()));
+        notificationsMap.put("memberJoinChannelId", toText(notifications.getMemberJoinChannelId()));
+        notificationsMap.put("memberLeaveChannelId", toText(notifications.getMemberLeaveChannelId()));
         notificationsMap.put("memberJoinMessage", notifications.getMemberJoinMessage());
         notificationsMap.put("memberLeaveMessage", notifications.getMemberLeaveMessage());
         notificationsMap.put("memberJoinColor", String.format("#%06X", notifications.getMemberJoinColor()));
@@ -188,6 +190,7 @@ public class GuildSettingsService {
         Map<String, Object> logsMap = new LinkedHashMap<>();
         logsMap.put("enabled", logs.isEnabled());
         logsMap.put("channelId", toText(logs.getChannelId()));
+        logsMap.put("messageLogChannelId", toText(logs.getMessageLogChannelId()));
         logsMap.put("commandUsageChannelId", toText(logs.getCommandUsageChannelId()));
         logsMap.put("channelLifecycleChannelId", toText(logs.getChannelLifecycleChannelId()));
         logsMap.put("roleLogChannelId", toText(logs.getRoleLogChannelId()));
@@ -211,7 +214,6 @@ public class GuildSettingsService {
         Map<String, Object> privateRoomMap = new LinkedHashMap<>();
         privateRoomMap.put("enabled", privateRoom.isEnabled());
         privateRoomMap.put("triggerVoiceChannelId", toText(privateRoom.getTriggerVoiceChannelId()));
-        privateRoomMap.put("categoryId", toText(privateRoom.getCategoryId()));
         privateRoomMap.put("userLimit", privateRoom.getUserLimit());
         root.put("privateRoom", privateRoomMap);
 
