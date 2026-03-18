@@ -1,0 +1,254 @@
+package com.norule.musicbot;
+
+import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.Yaml;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.Writer;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.UnaryOperator;
+
+public class GuildSettingsService {
+    public static class GuildSettings {
+        private final String language;
+        private final BotConfig.Notifications notifications;
+        private final BotConfig.MessageLogs messageLogs;
+        private final BotConfig.Music music;
+        private final BotConfig.PrivateRoom privateRoom;
+
+        public GuildSettings(String language,
+                             BotConfig.Notifications notifications,
+                             BotConfig.MessageLogs messageLogs,
+                             BotConfig.Music music,
+                             BotConfig.PrivateRoom privateRoom) {
+            this.language = language;
+            this.notifications = notifications;
+            this.messageLogs = messageLogs;
+            this.music = music;
+            this.privateRoom = privateRoom;
+        }
+
+        public String getLanguage() {
+            return language;
+        }
+
+        public BotConfig.Notifications getNotifications() {
+            return notifications;
+        }
+
+        public BotConfig.MessageLogs getMessageLogs() {
+            return messageLogs;
+        }
+
+        public BotConfig.Music getMusic() {
+            return music;
+        }
+
+        public BotConfig.PrivateRoom getPrivateRoom() {
+            return privateRoom;
+        }
+
+        public GuildSettings withLanguage(String language) {
+            return new GuildSettings(language, notifications, messageLogs, music, privateRoom);
+        }
+
+        public GuildSettings withNotifications(BotConfig.Notifications notifications) {
+            return new GuildSettings(language, notifications, messageLogs, music, privateRoom);
+        }
+
+        public GuildSettings withMessageLogs(BotConfig.MessageLogs messageLogs) {
+            return new GuildSettings(language, notifications, messageLogs, music, privateRoom);
+        }
+
+        public GuildSettings withMusic(BotConfig.Music music) {
+            return new GuildSettings(language, notifications, messageLogs, music, privateRoom);
+        }
+
+        public GuildSettings withPrivateRoom(BotConfig.PrivateRoom privateRoom) {
+            return new GuildSettings(language, notifications, messageLogs, music, privateRoom);
+        }
+    }
+
+    private final Path settingsDir;
+    private final GuildSettings defaults;
+    private final Map<Long, GuildSettings> cache = new ConcurrentHashMap<>();
+
+    public GuildSettingsService(Path settingsDir, BotConfig defaultsConfig) {
+        this.settingsDir = settingsDir;
+        this.defaults = new GuildSettings(
+                defaultsConfig.getDefaultLanguage(),
+                defaultsConfig.getNotifications(),
+                defaultsConfig.getMessageLogs(),
+                defaultsConfig.getMusic(),
+                defaultsConfig.getPrivateRoom()
+        );
+
+        try {
+            Files.createDirectories(settingsDir);
+        } catch (IOException e) {
+            throw new IllegalStateException("Unable to create guild settings directory: " + settingsDir.toAbsolutePath(), e);
+        }
+    }
+
+    public GuildSettings getSettings(long guildId) {
+        return cache.computeIfAbsent(guildId, this::loadOrCreateSettings);
+    }
+
+    public String getLanguage(long guildId) {
+        return getSettings(guildId).getLanguage();
+    }
+
+    public BotConfig.Notifications getNotifications(long guildId) {
+        return getSettings(guildId).getNotifications();
+    }
+
+    public BotConfig.MessageLogs getMessageLogs(long guildId) {
+        return getSettings(guildId).getMessageLogs();
+    }
+
+    public BotConfig.Music getMusic(long guildId) {
+        return getSettings(guildId).getMusic();
+    }
+
+    public BotConfig.PrivateRoom getPrivateRoom(long guildId) {
+        return getSettings(guildId).getPrivateRoom();
+    }
+
+    public GuildSettings updateSettings(long guildId, UnaryOperator<GuildSettings> updater) {
+        GuildSettings current = getSettings(guildId);
+        GuildSettings updated = updater.apply(current);
+        writeSettings(guildId, updated);
+        cache.put(guildId, updated);
+        return updated;
+    }
+
+    public GuildSettings reload(long guildId) {
+        cache.remove(guildId);
+        return getSettings(guildId);
+    }
+
+    private GuildSettings loadOrCreateSettings(long guildId) {
+        Path guildFile = settingsDir.resolve(guildId + ".yml");
+        if (!Files.exists(guildFile)) {
+            writeTemplate(guildFile, guildId);
+            return defaults;
+        }
+
+        try (InputStream in = Files.newInputStream(guildFile)) {
+            Object root = new Yaml().load(in);
+            Map<String, Object> rootMap = asMap(root);
+            String language = readLanguage(rootMap.get("language"), defaults.getLanguage());
+            BotConfig.Notifications notifications = BotConfig.Notifications.fromMap(asMap(rootMap.get("notifications")), defaults.getNotifications());
+            BotConfig.MessageLogs messageLogs = BotConfig.MessageLogs.fromMap(asMap(rootMap.get("messageLogs")), defaults.getMessageLogs());
+            BotConfig.Music music = BotConfig.Music.fromMap(asMap(rootMap.get("music")), defaults.getMusic());
+            BotConfig.PrivateRoom privateRoom = BotConfig.PrivateRoom.fromMap(asMap(rootMap.get("privateRoom")), defaults.getPrivateRoom());
+            return new GuildSettings(language, notifications, messageLogs, music, privateRoom);
+        } catch (Exception e) {
+            return defaults;
+        }
+    }
+
+    private void writeTemplate(Path guildFile, long guildId) {
+        writeToFile(guildFile, String.valueOf(guildId), defaults);
+    }
+
+    private void writeSettings(long guildId, GuildSettings settings) {
+        Path guildFile = settingsDir.resolve(guildId + ".yml");
+        writeToFile(guildFile, String.valueOf(guildId), settings);
+    }
+
+    private void writeToFile(Path guildFile, String guildId, GuildSettings settings) {
+        Map<String, Object> root = new LinkedHashMap<>();
+        root.put("guildId", guildId);
+        root.put("language", settings.getLanguage());
+
+        BotConfig.Notifications notifications = settings.getNotifications();
+        Map<String, Object> notificationsMap = new LinkedHashMap<>();
+        notificationsMap.put("enabled", notifications.isEnabled());
+        notificationsMap.put("memberJoinEnabled", notifications.isMemberJoinEnabled());
+        notificationsMap.put("memberLeaveEnabled", notifications.isMemberLeaveEnabled());
+        notificationsMap.put("voiceLogEnabled", notifications.isVoiceLogEnabled());
+        notificationsMap.put("memberChannelId", toText(notifications.getMemberChannelId()));
+        notificationsMap.put("memberJoinMessage", notifications.getMemberJoinMessage());
+        notificationsMap.put("memberLeaveMessage", notifications.getMemberLeaveMessage());
+        notificationsMap.put("memberJoinColor", String.format("#%06X", notifications.getMemberJoinColor()));
+        notificationsMap.put("memberLeaveColor", String.format("#%06X", notifications.getMemberLeaveColor()));
+        notificationsMap.put("voiceChannelId", toText(notifications.getVoiceChannelId()));
+        notificationsMap.put("voiceJoinMessage", notifications.getVoiceJoinMessage());
+        notificationsMap.put("voiceLeaveMessage", notifications.getVoiceLeaveMessage());
+        notificationsMap.put("voiceMoveMessage", notifications.getVoiceMoveMessage());
+        root.put("notifications", notificationsMap);
+
+        BotConfig.MessageLogs logs = settings.getMessageLogs();
+        Map<String, Object> logsMap = new LinkedHashMap<>();
+        logsMap.put("enabled", logs.isEnabled());
+        logsMap.put("channelId", toText(logs.getChannelId()));
+        logsMap.put("commandUsageChannelId", toText(logs.getCommandUsageChannelId()));
+        logsMap.put("channelLifecycleChannelId", toText(logs.getChannelLifecycleChannelId()));
+        logsMap.put("roleLogChannelId", toText(logs.getRoleLogChannelId()));
+        logsMap.put("moderationLogChannelId", toText(logs.getModerationLogChannelId()));
+        logsMap.put("roleLogEnabled", logs.isRoleLogEnabled());
+        logsMap.put("channelLifecycleLogEnabled", logs.isChannelLifecycleLogEnabled());
+        logsMap.put("moderationLogEnabled", logs.isModerationLogEnabled());
+        logsMap.put("commandUsageLogEnabled", logs.isCommandUsageLogEnabled());
+        root.put("messageLogs", logsMap);
+
+        BotConfig.Music music = settings.getMusic();
+        Map<String, Object> musicMap = new LinkedHashMap<>();
+        musicMap.put("autoLeaveEnabled", music.isAutoLeaveEnabled());
+        musicMap.put("autoLeaveMinutes", music.getAutoLeaveMinutes());
+        musicMap.put("autoplayEnabled", music.isAutoplayEnabled());
+        musicMap.put("defaultRepeatMode", music.getDefaultRepeatMode().name());
+        musicMap.put("commandChannelId", toText(music.getCommandChannelId()));
+        root.put("music", musicMap);
+
+        BotConfig.PrivateRoom privateRoom = settings.getPrivateRoom();
+        Map<String, Object> privateRoomMap = new LinkedHashMap<>();
+        privateRoomMap.put("enabled", privateRoom.isEnabled());
+        privateRoomMap.put("triggerVoiceChannelId", toText(privateRoom.getTriggerVoiceChannelId()));
+        privateRoomMap.put("categoryId", toText(privateRoom.getCategoryId()));
+        privateRoomMap.put("userLimit", privateRoom.getUserLimit());
+        root.put("privateRoom", privateRoomMap);
+
+        DumperOptions options = new DumperOptions();
+        options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
+        options.setPrettyFlow(true);
+        options.setIndent(2);
+
+        Yaml yaml = new Yaml(options);
+        try {
+            Files.createDirectories(guildFile.getParent());
+        } catch (IOException ignored) {
+        }
+
+        try (Writer writer = Files.newBufferedWriter(guildFile)) {
+            yaml.dump(root, writer);
+        } catch (IOException ignored) {
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asMap(Object object) {
+        if (object instanceof Map) {
+            return (Map<String, Object>) object;
+        }
+        return Map.of();
+    }
+
+    private String toText(Long value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private String readLanguage(Object value, String fallback) {
+        if (value == null) {
+            return fallback;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isBlank() ? fallback : text;
+    }
+}

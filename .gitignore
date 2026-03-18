@@ -1,0 +1,18 @@
+# Build output
+target/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Runtime data
+guild-configs/
+lang/
+
+# Local config/secrets
+config.yml
+
+# OS
+.DS_Store
+Thumbs.db
