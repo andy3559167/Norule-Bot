@@ -6,6 +6,8 @@ import org.yaml.snakeyaml.Yaml;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.Writer;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -82,7 +84,7 @@ public class ModerationService {
         long numberChainNext = 1L;
         Long numberChainLastUserId;
         long numberChainHighestNumber;
-        Map<Long, Long> numberChainContributors = new LinkedHashMap<>();
+        Map<Long, Long> numberChainSuccessContributors = new LinkedHashMap<>();
         Map<Long, Integer> warnings = new LinkedHashMap<>();
     }
 
@@ -220,7 +222,7 @@ public class ModerationService {
         GuildData data = get(guildId);
         synchronized (data) {
             int safeLimit = Math.max(1, limit);
-            return data.numberChainContributors.entrySet().stream()
+            return data.numberChainSuccessContributors.entrySet().stream()
                     .filter(entry -> entry.getKey() != null && entry.getKey() > 0L
                             && entry.getValue() != null && entry.getValue() > 0L)
                     .sorted(Map.Entry.<Long, Long>comparingByValue(Comparator.reverseOrder())
@@ -262,8 +264,8 @@ public class ModerationService {
                 data.numberChainLastUserId = userId;
                 data.numberChainHighestNumber = Math.max(data.numberChainHighestNumber, expected);
                 if (userId > 0L) {
-                    data.numberChainContributors.put(userId,
-                            Math.max(0L, data.numberChainContributors.getOrDefault(userId, 0L)) + 1L);
+                    data.numberChainSuccessContributors.put(userId,
+                            Math.max(0L, data.numberChainSuccessContributors.getOrDefault(userId, 0L)) + 1L);
                 }
                 save(guildId, data);
                 return new NumberChainResult(NumberChainType.ACCEPTED, expected, parsed);
@@ -296,12 +298,15 @@ public class ModerationService {
             defaults.numberChainNext = Math.max(1L, readLong(numberChain.get("nextNumber"), 1L));
             defaults.numberChainLastUserId = readLong(numberChain.get("lastUserId"));
             defaults.numberChainHighestNumber = Math.max(0L, readLong(numberChain.get("highestNumber"), 0L));
-            Map<String, Object> contributorsMap = asMap(numberChain.get("contributors"));
+            Map<String, Object> contributorsMap = asMap(numberChain.get("successContributors"));
+            if (contributorsMap.isEmpty()) {
+                contributorsMap = asMap(numberChain.get("contributors"));
+            }
             for (Map.Entry<String, Object> entry : contributorsMap.entrySet()) {
                 Long userId = readLong(entry.getKey());
                 Long count = readLong(entry.getValue());
                 if (userId != null && userId > 0L && count != null && count > 0L) {
-                    defaults.numberChainContributors.put(userId, count);
+                    defaults.numberChainSuccessContributors.put(userId, count);
                 }
             }
 
@@ -331,11 +336,12 @@ public class ModerationService {
         chain.put("lastUserId", data.numberChainLastUserId == null ? "" : String.valueOf(data.numberChainLastUserId));
         chain.put("highestNumber", Math.max(0L, data.numberChainHighestNumber));
         Map<String, Object> contributors = new LinkedHashMap<>();
-        for (Map.Entry<Long, Long> entry : data.numberChainContributors.entrySet()) {
+        for (Map.Entry<Long, Long> entry : data.numberChainSuccessContributors.entrySet()) {
             if (entry.getKey() != null && entry.getKey() > 0L && entry.getValue() != null && entry.getValue() > 0L) {
                 contributors.put(String.valueOf(entry.getKey()), entry.getValue());
             }
         }
+        chain.put("successContributors", contributors);
         chain.put("contributors", contributors);
         root.put("numberChain", chain);
 
@@ -370,58 +376,57 @@ public class ModerationService {
         if (text == null) {
             return new ExpressionEvaluationResult(false, null);
         }
-        if (text.isBlank() || text.length() > 64) {
-            return new ExpressionEvaluationResult(true, null);
+        if (!containsDigit(text)) {
+            return new ExpressionEvaluationResult(false, null);
         }
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (!Character.isDigit(c)
-                    && c != '+'
-                    && c != '-'
-                    && c != '*'
-                    && c != '/'
-                    && c != '('
-                    && c != ')'
-                    && c != '.') {
+        // Number chain accepts pure integer or simple binary expression (e.g. 1+1, 1X1).
+        if (text.matches("\\d+")) {
+            if (text.length() > 18) {
                 return new ExpressionEvaluationResult(true, null);
             }
-        }
-        if (text.matches("[+-]?\\d+")) {
             try {
                 return new ExpressionEvaluationResult(true, Long.parseLong(text));
             } catch (NumberFormatException ignored) {
                 return new ExpressionEvaluationResult(true, null);
             }
         }
-        if (containsLongNumericToken(text)) {
+        String normalizedOp = text.replace('X', '*').replace('x', '*').replace('?', '*');
+        if (!normalizedOp.matches("\\d+[+\\-*/]\\d+")) {
+            return new ExpressionEvaluationResult(false, null);
+        }
+        String[] parts = normalizedOp.split("([+\\-*/])", 2);
+        if (parts.length != 2) {
             return new ExpressionEvaluationResult(true, null);
         }
+        char op = normalizedOp.replaceAll("\\d", "").charAt(0);
         try {
-            ExpressionParser parser = new ExpressionParser(text);
-            double value = parser.parse();
-            if (!Double.isFinite(value)) {
-                return new ExpressionEvaluationResult(true, null);
+            BigDecimal left = BigDecimal.valueOf(Long.parseLong(parts[0]));
+            BigDecimal right = BigDecimal.valueOf(Long.parseLong(parts[1]));
+            BigDecimal computed;
+            switch (op) {
+                case '+' -> computed = left.add(right);
+                case '-' -> computed = left.subtract(right);
+                case '*' -> computed = left.multiply(right);
+                case '/' -> {
+                    if (right.compareTo(BigDecimal.ZERO) == 0) {
+                        return new ExpressionEvaluationResult(true, null);
+                    }
+                    computed = left.divide(right, 16, RoundingMode.HALF_UP);
+                }
+                default -> {
+                    return new ExpressionEvaluationResult(true, null);
+                }
             }
-            if (value > Long.MAX_VALUE - 0.5d || value < Long.MIN_VALUE + 0.5d) {
-                return new ExpressionEvaluationResult(true, null);
-            }
-            return new ExpressionEvaluationResult(true, Math.round(value));
+            long value = Math.round(computed.doubleValue());
+            return new ExpressionEvaluationResult(true, value);
         } catch (Exception ignored) {
             return new ExpressionEvaluationResult(true, null);
         }
     }
-
-    private boolean containsLongNumericToken(String text) {
-        int digits = 0;
+    private boolean containsDigit(String text) {
         for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (Character.isDigit(c)) {
-                digits++;
-                if (digits > 15) {
-                    return true;
-                }
-            } else if (c != '.') {
-                digits = 0;
+            if (Character.isDigit(text.charAt(i))) {
+                return true;
             }
         }
         return false;
@@ -429,60 +434,15 @@ public class ModerationService {
 
     private String extractSingleExpression(String raw) {
         String normalized = normalizeExpressionSource(raw);
-        StringBuilder current = new StringBuilder();
-        String candidate = null;
-
-        for (int i = 0; i < normalized.length(); i++) {
-            char c = normalized.charAt(i);
-            if (isExpressionChar(c) || Character.isWhitespace(c)) {
-                current.append(c);
-                continue;
-            }
-
-            String segment = compactExpression(current);
-            if (!segment.isBlank()) {
-                if (candidate != null) {
-                    return null;
-                }
-                candidate = segment;
-            }
-            current.setLength(0);
+        if (normalized == null) {
+            return null;
         }
-
-        String tail = compactExpression(current);
-        if (!tail.isBlank()) {
-            if (candidate != null) {
-                return null;
-            }
-            candidate = tail;
-        }
-        return candidate;
-    }
-
-    private String compactExpression(CharSequence source) {
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < source.length(); i++) {
-            char c = source.charAt(i);
-            if (!Character.isWhitespace(c)) {
-                out.append(c);
-            }
-        }
-        return out.toString();
-    }
-
-    private boolean isExpressionChar(char c) {
-        return Character.isDigit(c)
-                || c == '+'
-                || c == '-'
-                || c == '*'
-                || c == '/'
-                || c == '('
-                || c == ')'
-                || c == '.';
+        String compact = normalized.replaceAll("\\s+", "");
+        return compact.isBlank() ? null : compact;
     }
 
     private String normalizeExpressionSource(String raw) {
-        return raw.trim()
+        String normalized = raw.trim()
                 .replaceAll("https?://\\S+", " ")
                 .replaceAll("<@!?\\d+>", " ")
                 .replaceAll("<@&\\d+>", " ")
@@ -490,113 +450,9 @@ public class ModerationService {
                 .replaceAll("</[^:>]+:\\d+>", " ")
                 .replaceAll("<a?:[^:>]+:\\d+>", " ")
                 .replaceAll("<t:\\d+(?::[tTdDfFR])?>", " ")
-                .replace('\u00A0', ' ')
-                .replace('x', '*')
-                .replace('X', '*')
-                .replace('×', '*')
-                .replace('÷', '/');
-    }
-
-    private static class ExpressionParser {
-        private final String s;
-        private int i = 0;
-
-        private ExpressionParser(String s) {
-            this.s = s;
-        }
-
-        private double parse() {
-            double value = parseExpression();
-            if (i != s.length()) {
-                throw new IllegalArgumentException("Unexpected token");
-            }
-            return value;
-        }
-
-        private double parseExpression() {
-            double value = parseTerm();
-            while (i < s.length()) {
-                char c = s.charAt(i);
-                if (c == '+') {
-                    i++;
-                    value += parseTerm();
-                } else if (c == '-') {
-                    i++;
-                    value -= parseTerm();
-                } else {
-                    break;
-                }
-            }
-            return value;
-        }
-
-        private double parseTerm() {
-            double value = parseFactor();
-            while (i < s.length()) {
-                char c = s.charAt(i);
-                if (c == '*') {
-                    i++;
-                    value *= parseFactor();
-                } else if (c == '/') {
-                    i++;
-                    double divisor = parseFactor();
-                    if (Math.abs(divisor) < 1e-12) {
-                        throw new IllegalArgumentException("Divide by zero");
-                    }
-                    value /= divisor;
-                } else {
-                    break;
-                }
-            }
-            return value;
-        }
-
-        private double parseFactor() {
-            if (i >= s.length()) {
-                throw new IllegalArgumentException("Unexpected end");
-            }
-            char c = s.charAt(i);
-            if (c == '+') {
-                i++;
-                return parseFactor();
-            }
-            if (c == '-') {
-                i++;
-                return -parseFactor();
-            }
-            if (c == '(') {
-                i++;
-                double value = parseExpression();
-                if (i >= s.length() || s.charAt(i) != ')') {
-                    throw new IllegalArgumentException("Missing )");
-                }
-                i++;
-                return value;
-            }
-            return parseNumber();
-        }
-
-        private double parseNumber() {
-            int start = i;
-            boolean seenDot = false;
-            while (i < s.length()) {
-                char c = s.charAt(i);
-                if (Character.isDigit(c)) {
-                    i++;
-                    continue;
-                }
-                if (c == '.' && !seenDot) {
-                    seenDot = true;
-                    i++;
-                    continue;
-                }
-                break;
-            }
-            if (start == i || ".".equals(s.substring(start, i))) {
-                throw new IllegalArgumentException("Expected number");
-            }
-            return Double.parseDouble(s.substring(start, i));
-        }
+                .replace('\u00A0', ' ');
+        normalized = normalized.replaceAll("(?<=\\d)\\s*[xX]\\s*(?=\\d)", "*");
+        return normalized;
     }
 
     @SuppressWarnings("unchecked")
@@ -658,3 +514,4 @@ public class ModerationService {
         }
     }
 }
+

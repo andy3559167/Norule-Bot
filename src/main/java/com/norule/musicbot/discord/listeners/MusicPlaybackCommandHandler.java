@@ -66,24 +66,28 @@ final class MusicPlaybackCommandHandler {
     }
 
     void handlePlaySlash(SlashCommandInteractionEvent event, String lang) {
+        event.deferReply().queue(success -> handlePlaySlashDeferred(event, lang), failure -> {
+        });
+    }
+
+    private void handlePlaySlashDeferred(SlashCommandInteractionEvent event, String lang) {
         String query = getPlayQuery(event);
         if (query.isBlank()) {
-            event.reply(owner.i18nService().t(lang, "music.not_found", Map.of("query", ""))).setEphemeral(true).queue();
+            event.getHook().sendMessage(owner.i18nService().t(lang, "music.not_found", Map.of("query", ""))).queue();
             return;
         }
         if (looksLikeUrl(query)) {
-            event.deferReply().queue(success -> directPlay(
+            directPlay(
                     event.getGuild(),
                     event.getMember(),
                     query,
                     text -> event.getHook().sendMessage(text).queue(),
                     event.getChannelType() == ChannelType.TEXT ? event.getChannel().asTextChannel() : null
-            ), failure -> {
-            });
+            );
             return;
         }
 
-        event.deferReply().queue(success -> owner.musicService().searchTopTracks(query, 10, results -> {
+        owner.musicService().searchTopTracks(query, 10, results -> {
             if (results.isEmpty()) {
                 event.getHook().sendMessage(owner.i18nService().t(lang, "music.not_found", Map.of("query", query))).queue();
                 return;
@@ -106,8 +110,7 @@ final class MusicPlaybackCommandHandler {
                     .setComponents(ActionRow.of(buildSearchMenu(token, results)))
                     .queue(message -> owner.scheduler().schedule(() -> expireSearchMenu(token, event.getGuild().getIdLong(), message.getIdLong()),
                             30, TimeUnit.SECONDS));
-        }, error -> event.getHook().sendMessage(owner.mapMusicLoadError(lang, error)).queue()), failure -> {
-        });
+        }, error -> event.getHook().sendMessage(owner.mapMusicLoadError(lang, error)).queue());
     }
 
     void handleSkipSlash(SlashCommandInteractionEvent event) {

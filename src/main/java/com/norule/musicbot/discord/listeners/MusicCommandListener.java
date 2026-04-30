@@ -4451,6 +4451,10 @@ public class MusicCommandListener extends ListenerAdapter {
     }
 
     String mapMusicLoadError(String lang, String rawError) {
+        if ("SPOTIFY_RATE_LIMITED".equalsIgnoreCase(rawError)
+                || "SPOTIFY_PLAYLIST_COOLDOWN".equalsIgnoreCase(rawError)) {
+            return "Spotify 請求過於頻繁，請稍後再試。";
+        }
         return i18n.t(lang, YoutubePlaybackErrorMapper.toMessageKey(rawError));
     }
 

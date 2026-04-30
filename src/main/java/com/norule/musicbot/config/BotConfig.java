@@ -1407,49 +1407,49 @@ public class BotConfig {
         }
 
         public static class Spotify {
-            private final boolean enabled;
             private final String clientId;
             private final String clientSecret;
             private final String spDc;
             private final String countryCode;
             private final boolean preferAnonymousToken;
             private final String customTokenEndpoint;
+            private final int playlistMaxTracks;
+            private final int playlistLoadCooldownSeconds;
 
-            private Spotify(boolean enabled,
-                            String clientId,
+            private Spotify(String clientId,
                             String clientSecret,
                             String spDc,
                             String countryCode,
                             boolean preferAnonymousToken,
-                            String customTokenEndpoint) {
-                this.enabled = enabled;
+                            String customTokenEndpoint,
+                            int playlistMaxTracks,
+                            int playlistLoadCooldownSeconds) {
                 this.clientId = nullToEmpty(clientId);
                 this.clientSecret = nullToEmpty(clientSecret);
                 this.spDc = nullToEmpty(spDc);
                 this.countryCode = nullToEmpty(countryCode);
                 this.preferAnonymousToken = preferAnonymousToken;
                 this.customTokenEndpoint = nullToEmpty(customTokenEndpoint);
+                this.playlistMaxTracks = Math.max(1, playlistMaxTracks);
+                this.playlistLoadCooldownSeconds = Math.max(0, playlistLoadCooldownSeconds);
             }
 
             public static Spotify fromMap(Map<String, Object> map, Spotify fallback) {
                 Spotify defaults = fallback == null ? defaultValues() : fallback;
                 return new Spotify(
-                        getBoolean(map, "enabled", defaults.isEnabled()),
                         getString(map, "clientId", defaults.getClientId()),
                         getString(map, "clientSecret", defaults.getClientSecret()),
                         getString(map, "spDc", defaults.getSpDc()),
                         getString(map, "countryCode", defaults.getCountryCode()),
                         getBoolean(map, "preferAnonymousToken", defaults.isPreferAnonymousToken()),
-                        getString(map, "customTokenEndpoint", defaults.getCustomTokenEndpoint())
+                        getString(map, "customTokenEndpoint", defaults.getCustomTokenEndpoint()),
+                        getInt(map, "playlistMaxTracks", defaults.getPlaylistMaxTracks()),
+                        getInt(map, "playlistLoadCooldownSeconds", defaults.getPlaylistLoadCooldownSeconds())
                 );
             }
 
             public static Spotify defaultValues() {
-                return new Spotify(true, "", "", "", "TW", false, "");
-            }
-
-            public boolean isEnabled() {
-                return enabled;
+                return new Spotify("", "", "", "TW", false, "", 50, 60);
             }
 
             public String getClientId() {
@@ -1474,6 +1474,14 @@ public class BotConfig {
 
             public String getCustomTokenEndpoint() {
                 return customTokenEndpoint;
+            }
+
+            public int getPlaylistMaxTracks() {
+                return playlistMaxTracks;
+            }
+
+            public int getPlaylistLoadCooldownSeconds() {
+                return playlistLoadCooldownSeconds;
             }
         }
 

@@ -38,13 +38,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -58,8 +57,12 @@ import java.util.regex.Pattern;
 public class MusicPlayerService {
     private static final String YT_SEARCH_PREFIX = "ytsearch:";
     private static final Pattern JSON_FIELD_PATTERN_TEMPLATE = Pattern.compile("\"%s\"\\s*:\\s*\"(.*?)\"");
-    private static final long SPOTIFY_RATE_LIMIT_COOLDOWN_MS = 60_000L;
-    private static final long[] SPOTIFY_RATE_LIMIT_RETRY_DELAYS_MS = new long[] {3000L, 8000L};
+    private static final long SPOTIFY_RATE_LIMIT_COOLDOWN_MS = 10 * 60_000L;
+    private static final String SPOTIFY_RATE_LIMIT_ERROR_KEY = "SPOTIFY_RATE_LIMITED";
+    private static final String SPOTIFY_PLAYLIST_COOLDOWN_ERROR_KEY = "SPOTIFY_PLAYLIST_COOLDOWN";
+    private static final String STRICT_YOUTUBE_PLAYLIST_PREFIX = "https://www.youtube.com/playlist?list=";
+    private static final long YOUTUBE_PLAYLIST_CACHE_TTL_MS = 30 * 60_000L;
+    private static final int YOUTUBE_PLAYLIST_BATCH_SIZE = 25;
 
     private final AudioPlayerManager playerManager;
     private final MusicDataService musicDataService;
@@ -67,9 +70,15 @@ public class MusicPlayerService {
     private final Map<Long, Runnable> guildStateListeners = new ConcurrentHashMap<>();
     private final Map<Long, Long> lastCommandChannelByGuild = new ConcurrentHashMap<>();
     private final Map<Long, String> autoplayNoticeByGuild = new ConcurrentHashMap<>();
-    private final Map<String, Long> spotifyRateLimitUntilByKey = new ConcurrentHashMap<>();
+    private final Map<Long, Long> spotifyRateLimitGuildCooldownUntil = new ConcurrentHashMap<>();
+    private final Map<Long, Long> spotifyRateLimitUserCooldownUntil = new ConcurrentHashMap<>();
+    private final Map<Long, Long> spotifyPlaylistCooldownByGuild = new ConcurrentHashMap<>();
+    private final Map<String, CachedPlaylistTracks> youtubePlaylistCache = new ConcurrentHashMap<>();
     private final BotConfig.Music.Youtube youtubeConfig;
     private final BotConfig.Music.Spotify spotifyConfig;
+    private final int playlistTrackLimit;
+    private final int spotifyPlaylistMaxTracks;
+    private final long spotifyPlaylistLoadCooldownMs;
     private final boolean spotifySourceEnabled;
     private volatile BiConsumer<Long, PlaybackFailure> playbackFailureListener;
     private volatile LongPredicate autoplayEnabledChecker = guildId -> true;
@@ -83,8 +92,18 @@ public class MusicPlayerService {
                               BotConfig.Music.Youtube youtubeConfig,
                               BotConfig.Music.Spotify spotifyConfig) {
         this.musicDataService = new MusicDataService(dataDir, musicConfigResolver);
+        BotConfig.Music defaultMusicConfig = BotConfig.Music.defaultValues();
+        BotConfig.Music resolvedMusicConfig = musicConfigResolver == null
+                ? defaultMusicConfig
+                : musicConfigResolver.apply(0L);
+        if (resolvedMusicConfig == null) {
+            resolvedMusicConfig = defaultMusicConfig;
+        }
         this.youtubeConfig = youtubeConfig == null ? BotConfig.Music.Youtube.defaultValues() : youtubeConfig;
         this.spotifyConfig = spotifyConfig == null ? BotConfig.Music.Spotify.defaultValues() : spotifyConfig;
+        this.playlistTrackLimit = Math.max(1, resolvedMusicConfig.getPlaylistTrackLimit());
+        this.spotifyPlaylistMaxTracks = Math.max(1, this.spotifyConfig.getPlaylistMaxTracks());
+        this.spotifyPlaylistLoadCooldownMs = Math.max(0L, this.spotifyConfig.getPlaylistLoadCooldownSeconds()) * 1000L;
         playerManager = new DefaultAudioPlayerManager();
         configureYouTubePoToken();
         YoutubeAudioSourceManager youtubeSourceManager = createYoutubeSourceManager();
@@ -97,9 +116,6 @@ public class MusicPlayerService {
     }
 
     private boolean registerSpotifySourceIfConfigured() {
-        if (!spotifyConfig.isEnabled()) {
-            return false;
-        }
         String clientId = firstNonBlank(System.getenv("SPOTIFY_CLIENT_ID"), spotifyConfig.getClientId());
         String clientSecret = firstNonBlank(System.getenv("SPOTIFY_CLIENT_SECRET"), spotifyConfig.getClientSecret());
         String spDc = firstNonBlank(System.getenv("SPOTIFY_SP_DC"), spotifyConfig.getSpDc());
@@ -443,7 +459,7 @@ public class MusicPlayerService {
         resumeIfPaused(guildMusicManager.getPlayer(), guild.getIdLong());
         ResolvedInput resolvedInput = resolveInput(input);
         String identifier = resolvedInput.isUrl ? resolvedInput.identifier : YT_SEARCH_PREFIX + resolvedInput.identifier;
-        load(guildMusicManager, messageSender, input, identifier, resolvedInput.sourceLabel, true, requesterId, requesterName, 0);
+        load(guild.getIdLong(), guildMusicManager, messageSender, input, identifier, resolvedInput.sourceLabel, true, requesterId, requesterName, 0);
     }
 
     public void searchTopTracks(String query, int limit, Consumer<List<AudioTrack>> onSuccess, Consumer<String> onError) {
@@ -494,10 +510,11 @@ public class MusicPlayerService {
         GuildMusicManager guildMusicManager = getGuildMusicManager(guild);
         clearAutoplayNotice(guild.getIdLong());
         resumeIfPaused(guildMusicManager.getPlayer(), guild.getIdLong());
-        load(guildMusicManager, messageSender, identifier, identifier, sourceLabel, false, requesterId, requesterName, 0);
+        load(guild.getIdLong(), guildMusicManager, messageSender, identifier, identifier, sourceLabel, false, requesterId, requesterName, 0);
     }
 
-    private void load(GuildMusicManager guildMusicManager,
+    private void load(long guildId,
+                      GuildMusicManager guildMusicManager,
                       Consumer<String> messageSender,
                       String userInput,
                       String identifier,
@@ -506,12 +523,35 @@ public class MusicPlayerService {
                       Long requesterId,
                       String requesterName,
                       int spotifyRateLimitRetryAttempt) {
-        String spotifyRateLimitKey = spotifyRateLimitKey(userInput);
-        if (spotifyRateLimitKey != null) {
-            Long limitedUntil = spotifyRateLimitUntilByKey.get(spotifyRateLimitKey);
+        if (isSpotifyPlaylistUrl(userInput) && spotifyPlaylistLoadCooldownMs > 0L) {
             long now = System.currentTimeMillis();
-            if (limitedUntil != null && limitedUntil > now) {
-                messageSender.accept("LOAD_FAILED:Spotify API rate-limited. Please retry shortly.");
+            Long cooldownUntil = spotifyPlaylistCooldownByGuild.get(guildId);
+            if (cooldownUntil != null && cooldownUntil > now) {
+                messageSender.accept("LOAD_FAILED:" + SPOTIFY_PLAYLIST_COOLDOWN_ERROR_KEY);
+                return;
+            }
+        }
+        if (looksLikeSpotifyUrl(userInput)) {
+            long now = System.currentTimeMillis();
+            Long guildLimitedUntil = spotifyRateLimitGuildCooldownUntil.get(guildId);
+            if (guildLimitedUntil != null && guildLimitedUntil > now) {
+                messageSender.accept("LOAD_FAILED:" + SPOTIFY_RATE_LIMIT_ERROR_KEY);
+                return;
+            }
+            if (requesterId != null) {
+                Long userLimitedUntil = spotifyRateLimitUserCooldownUntil.get(requesterId);
+                if (userLimitedUntil != null && userLimitedUntil > now) {
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_RATE_LIMIT_ERROR_KEY);
+                    return;
+                }
+            }
+        }
+        if (isYouTubePlaylistUrl(userInput)) {
+            List<AudioTrack> cachedTracks = getCachedYoutubePlaylistTracks(userInput);
+            if (!cachedTracks.isEmpty()) {
+                List<AudioTrack> limited = cachedTracks.stream().limit(playlistTrackLimit).toList();
+                enqueuePlaylistTracksBatched(guildMusicManager, limited, sourceLabel, requesterId, requesterName);
+                messageSender.accept(limited.get(0).getInfo().title);
                 return;
             }
         }
@@ -527,6 +567,29 @@ public class MusicPlayerService {
             public void playlistLoaded(AudioPlaylist playlist) {
                 if (playlist.getTracks().isEmpty()) {
                     messageSender.accept("NO_MATCH");
+                    return;
+                }
+                if (isSpotifyPlaylistUrl(userInput) && spotifyPlaylistLoadCooldownMs > 0L) {
+                    spotifyPlaylistCooldownByGuild.put(guildId, System.currentTimeMillis() + spotifyPlaylistLoadCooldownMs);
+                }
+                if (isSpotifyPlaylistUrl(userInput)) {
+                    int limit = Math.min(spotifyPlaylistMaxTracks, playlist.getTracks().size());
+                    for (int i = 0; i < limit; i++) {
+                        AudioTrack track = playlist.getTracks().get(i);
+                        applyTrackMetadata(track, sourceLabel, requesterId, requesterName);
+                        guildMusicManager.getScheduler().queue(track);
+                    }
+                    messageSender.accept(playlist.getTracks().get(0).getInfo().title);
+                    return;
+                }
+                if (isYouTubePlaylistUrl(userInput)) {
+                    List<AudioTrack> tracksToQueue = playlist.getTracks().stream()
+                            .limit(playlistTrackLimit)
+                            .map(AudioTrack::makeClone)
+                            .toList();
+                    cacheYoutubePlaylistTracks(userInput, tracksToQueue);
+                    enqueuePlaylistTracksBatched(guildMusicManager, tracksToQueue, sourceLabel, requesterId, requesterName);
+                    messageSender.accept(playlist.getTracks().get(0).getInfo().title);
                     return;
                 }
                 AudioTrack firstTrack = playlist.getSelectedTrack() != null
@@ -545,19 +608,18 @@ public class MusicPlayerService {
             @Override
             public void loadFailed(FriendlyException exception) {
                 logLoadFailureDetails("queue/load", userInput, identifier, exception);
-                if (spotifyRateLimitKey != null && isSpotifyRateLimited(exception)) {
-                    spotifyRateLimitUntilByKey.put(spotifyRateLimitKey, System.currentTimeMillis() + SPOTIFY_RATE_LIMIT_COOLDOWN_MS);
-                    if (spotifyRateLimitRetryAttempt < SPOTIFY_RATE_LIMIT_RETRY_DELAYS_MS.length) {
-                        long delayMs = SPOTIFY_RATE_LIMIT_RETRY_DELAYS_MS[spotifyRateLimitRetryAttempt];
-                        CompletableFuture.delayedExecutor(delayMs, TimeUnit.MILLISECONDS).execute(() ->
-                                load(guildMusicManager, messageSender, userInput, identifier, sourceLabel, allowFallback, requesterId, requesterName, spotifyRateLimitRetryAttempt + 1)
-                        );
-                        return;
+                if (looksLikeSpotifyUrl(userInput) && isSpotifyRateLimited(exception)) {
+                    long cooldownUntil = System.currentTimeMillis() + SPOTIFY_RATE_LIMIT_COOLDOWN_MS;
+                    spotifyRateLimitGuildCooldownUntil.put(guildId, cooldownUntil);
+                    if (requesterId != null) {
+                        spotifyRateLimitUserCooldownUntil.put(requesterId, cooldownUntil);
                     }
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_RATE_LIMIT_ERROR_KEY);
+                    return;
                 }
                 if (allowFallback && looksLikeYouTubeUrl(userInput)) {
                     String fallbackIdentifier = YT_SEARCH_PREFIX + userInput;
-                    load(guildMusicManager, messageSender, userInput, fallbackIdentifier, sourceLabel, false, requesterId, requesterName, 0);
+                    load(guildId, guildMusicManager, messageSender, userInput, fallbackIdentifier, sourceLabel, false, requesterId, requesterName, 0);
                     return;
                 }
                 messageSender.accept("LOAD_FAILED:" + exception.getMessage());
@@ -587,18 +649,6 @@ public class MusicPlayerService {
                 + " rootCause=" + root);
     }
 
-    private String spotifyRateLimitKey(String input) {
-        if (input == null) {
-            return null;
-        }
-        String trimmed = input.trim();
-        if (!looksLikeSpotifyUrl(trimmed)) {
-            return null;
-        }
-        int queryIndex = trimmed.indexOf('?');
-        return queryIndex >= 0 ? trimmed.substring(0, queryIndex) : trimmed;
-    }
-
     private boolean isSpotifyRateLimited(FriendlyException exception) {
         Throwable current = exception;
         while (current != null) {
@@ -614,6 +664,14 @@ public class MusicPlayerService {
             current = current.getCause();
         }
         return false;
+    }
+
+    private boolean isSpotifyPlaylistUrl(String text) {
+        if (text == null) {
+            return false;
+        }
+        String lower = text.toLowerCase();
+        return lower.contains("open.spotify.com/playlist/") || lower.startsWith("spotify:playlist:");
     }
 
     public void skip(Guild guild) {
@@ -908,6 +966,7 @@ public class MusicPlayerService {
                 continue;
             }
             load(
+                    guild.getIdLong(),
                     guildMusicManager,
                     messageSender == null ? ignored -> { } : messageSender,
                     identifier,
@@ -1340,13 +1399,24 @@ public class MusicPlayerService {
             return new ResolvedInput(trimmed, true, "soundcloud");
         }
         if (looksLikeYouTubeUrl(trimmed)) {
-            return new ResolvedInput(normalizeYouTubePlaybackUrl(trimmed), true, "youtube");
+            String normalized = normalizeYouTubePlaybackUrl(trimmed);
+            if (isYouTubePlaylistUrl(normalized)) {
+                return new ResolvedInput(normalized, true, "youtube");
+            }
+            String strictPlaylistUrl = toStrictYouTubePlaylistUrl(normalized);
+            if (strictPlaylistUrl != null) {
+                return new ResolvedInput(strictPlaylistUrl, true, "youtube");
+            }
+            return new ResolvedInput(normalized, true, "youtube");
         }
         return new ResolvedInput(trimmed, true, "url");
     }
 
     private String normalizeYouTubePlaybackUrl(String url) {
         if (url == null || url.isBlank()) {
+            return url;
+        }
+        if (isYouTubePlaylistUrl(url)) {
             return url;
         }
         try {
@@ -1401,6 +1471,113 @@ public class MusicPlayerService {
     private boolean looksLikeYouTubeUrl(String text) {
         String lower = text.toLowerCase();
         return lower.contains("youtube.com") || lower.contains("youtu.be");
+    }
+
+    private boolean isYouTubePlaylistUrl(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String raw = text.trim();
+        if (!raw.startsWith(STRICT_YOUTUBE_PLAYLIST_PREFIX)) {
+            return false;
+        }
+        String listPart = raw.substring(STRICT_YOUTUBE_PLAYLIST_PREFIX.length());
+        if (listPart.isBlank()) {
+            return false;
+        }
+        int amp = listPart.indexOf('&');
+        String listId = amp >= 0 ? listPart.substring(0, amp) : listPart;
+        return !listId.isBlank();
+    }
+
+    private String toStrictYouTubePlaylistUrl(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String lower = text.toLowerCase();
+        if (!lower.contains("youtube.com") || !lower.contains("list=") || lower.contains("/watch?")) {
+            return null;
+        }
+        int listIndex = lower.indexOf("list=");
+        if (listIndex < 0) {
+            return null;
+        }
+        String listPart = text.substring(listIndex + 5);
+        int amp = listPart.indexOf('&');
+        String listId = amp >= 0 ? listPart.substring(0, amp) : listPart;
+        if (listId.isBlank()) {
+            return null;
+        }
+        return STRICT_YOUTUBE_PLAYLIST_PREFIX + listId;
+    }
+
+    private void enqueuePlaylistTracksBatched(GuildMusicManager guildMusicManager,
+                                              List<AudioTrack> tracks,
+                                              String sourceLabel,
+                                              Long requesterId,
+                                              String requesterName) {
+        if (tracks == null || tracks.isEmpty()) {
+            return;
+        }
+        for (int i = 0; i < tracks.size(); i += YOUTUBE_PLAYLIST_BATCH_SIZE) {
+            int end = Math.min(i + YOUTUBE_PLAYLIST_BATCH_SIZE, tracks.size());
+            for (int j = i; j < end; j++) {
+                AudioTrack track = tracks.get(j);
+                if (track == null) {
+                    continue;
+                }
+                applyTrackMetadata(track, sourceLabel, requesterId, requesterName);
+                guildMusicManager.getScheduler().queue(track);
+            }
+        }
+    }
+
+    private void cacheYoutubePlaylistTracks(String sourceUrl, List<AudioTrack> tracks) {
+        String key = normalizeYouTubePlaylistCacheKey(sourceUrl);
+        if (key == null || tracks == null || tracks.isEmpty()) {
+            return;
+        }
+        List<AudioTrack> clones = tracks.stream()
+                .map(AudioTrack::makeClone)
+                .toList();
+        youtubePlaylistCache.put(key, new CachedPlaylistTracks(System.currentTimeMillis() + YOUTUBE_PLAYLIST_CACHE_TTL_MS, clones));
+    }
+
+    private List<AudioTrack> getCachedYoutubePlaylistTracks(String sourceUrl) {
+        String key = normalizeYouTubePlaylistCacheKey(sourceUrl);
+        if (key == null) {
+            return List.of();
+        }
+        CachedPlaylistTracks cached = youtubePlaylistCache.get(key);
+        if (cached == null) {
+            return List.of();
+        }
+        if (cached.expiresAtMs < System.currentTimeMillis()) {
+            youtubePlaylistCache.remove(key);
+            return List.of();
+        }
+        return cached.tracks.stream().map(AudioTrack::makeClone).toList();
+    }
+
+    private String normalizeYouTubePlaylistCacheKey(String url) {
+        if (!isYouTubePlaylistUrl(url)) {
+            return null;
+        }
+        String raw = url.trim();
+        String listPart = raw.substring(STRICT_YOUTUBE_PLAYLIST_PREFIX.length());
+        int amp = listPart.indexOf('&');
+        String listId = amp >= 0 ? listPart.substring(0, amp) : listPart;
+        return listId.isBlank() ? null : listId;
+    }
+
+    private static class CachedPlaylistTracks {
+        private final long expiresAtMs;
+        private final List<AudioTrack> tracks;
+
+        private CachedPlaylistTracks(long expiresAtMs, List<AudioTrack> tracks) {
+            this.expiresAtMs = expiresAtMs;
+            this.tracks = tracks == null ? Collections.emptyList() : tracks;
+        }
     }
 
     private boolean looksLikeSpotifyUrl(String text) {
