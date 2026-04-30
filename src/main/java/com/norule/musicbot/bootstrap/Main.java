@@ -4,6 +4,10 @@ import com.norule.musicbot.config.*;
 import com.norule.musicbot.domain.music.*;
 import com.norule.musicbot.i18n.*;
 import com.norule.musicbot.discord.listeners.*;
+import com.norule.musicbot.discord.listeners.stats.MessageStatsListener;
+import com.norule.musicbot.domain.stats.MessageStatsService;
+import com.norule.musicbot.domain.stats.MySqlMessageStatsRepository;
+import com.norule.musicbot.domain.stats.SqliteMessageStatsRepository;
 import com.norule.musicbot.web.*;
 
 import com.norule.musicbot.*;
@@ -88,6 +92,7 @@ public class Main {
         HoneypotService honeypotService = new HoneypotService(honeypotDataPath);
         TicketService ticketService = new TicketService(ticketDataPath, ticketTranscriptPath);
         TICKET_SERVICE.set(ticketService);
+        MessageStatsListener messageStatsListener = createMessageStatsListener(config, baseDir);
         I18nService i18nService = I18nService.load(languagePath, config.getDefaultLanguage());
         I18N_SERVICE.set(i18nService);
         MusicCommandListener musicCommandListener = new MusicCommandListener(playerService, config, guildSettingsService, moderationService, honeypotService);
@@ -123,6 +128,9 @@ public class Main {
                         new PrivateRoomListener(guildSettingsService, i18nService, cachePath),
                         ticketListener
                 );
+        if (messageStatsListener != null) {
+            builder.addEventListeners(messageStatsListener);
+        }
 
         JDA jda = builder.build();
         installConsoleShutdownListener(jda, i18nService, config.getDefaultLanguage(), configPath,
@@ -478,6 +486,52 @@ public class Main {
         }
 
         return cwdConfig;
+    }
+
+    private static MessageStatsListener createMessageStatsListener(BotConfig config, Path baseDir) {
+        BotConfig.Stats stats = config.getStats();
+        try {
+            MessageStatsService service;
+            if ("sqlite".equalsIgnoreCase(stats.getStorage())) {
+                Path sqlitePath = resolveDataPath(baseDir, stats.getSqlite().getPath());
+                SqliteMessageStatsRepository repository = new SqliteMessageStatsRepository(sqlitePath);
+                service = new MessageStatsService(repository);
+                System.out.println("[NoRule] Message stats storage: sqlite (" + sqlitePath + ")");
+            } else {
+                BotConfig.Stats.Mysql mysql = stats.getMysql();
+                String jdbcUrl = getEnvOrDefault("MYSQL_JDBC_URL", mysql.getJdbcUrl());
+                String username = getEnvOrDefault("MYSQL_USER", mysql.getUsername());
+                String password = getEnvOrDefault("MYSQL_PASSWORD", mysql.getPassword());
+                int poolSize = parseIntEnv("MYSQL_POOL_SIZE", mysql.getPoolSize());
+                MySqlMessageStatsRepository repository = new MySqlMessageStatsRepository(jdbcUrl, username, password, poolSize);
+                service = new MessageStatsService(repository);
+                System.out.println("[NoRule] Message stats storage: mysql");
+            }
+            return new MessageStatsListener(service);
+        } catch (Exception e) {
+            System.out.println("[NoRule] Message stats disabled: " + e.getMessage());
+            if (config.isDebug()) {
+                e.printStackTrace(System.out);
+            }
+            return null;
+        }
+    }
+
+    private static String getEnvOrDefault(String key, String defaultValue) {
+        String value = System.getenv(key);
+        return value == null || value.isBlank() ? defaultValue : value.trim();
+    }
+
+    private static int parseIntEnv(String key, int defaultValue) {
+        String raw = System.getenv(key);
+        if (raw == null || raw.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException ignored) {
+            return defaultValue;
+        }
     }
 
     private static boolean isTargetDir(Path path) {

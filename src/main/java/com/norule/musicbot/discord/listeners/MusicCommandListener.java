@@ -100,6 +100,8 @@ public class MusicCommandListener extends ListenerAdapter {
     static final String CMD_USER_INFO_ZH = "\u4f7f\u7528\u8005\u8cc7\u8a0a";
     static final String CMD_ROLE_INFO_ZH = "\u8eab\u5206\u7d44\u8cc7\u8a0a";
     static final String CMD_SERVER_INFO_ZH = "\u4f3a\u670d\u5668\u8cc7\u8a0a";
+    static final String CMD_STATS_ZH = "\u7d71\u8a08";
+    static final String CMD_LEADERBOARD_ZH = "\u6392\u884c\u699c";
     static final String SUB_SETTINGS_INFO_ZH = "\u8a73\u7d30\u8cc7\u8a0a";
     static final String SUB_SETTINGS_RELOAD_ZH = "\u91cd\u8f09\u8a2d\u5b9a";
     static final String SUB_SETTINGS_RESET_ZH = "\u6062\u5fa9\u9810\u8a2d";
@@ -3409,6 +3411,16 @@ public class MusicCommandListener extends ListenerAdapter {
         commands.add(buildRoleInfoCommand(CMD_ROLE_INFO_ZH));
         commands.add(buildServerInfoCommand("server-info"));
         commands.add(buildServerInfoCommand(CMD_SERVER_INFO_ZH));
+        commands.add(Commands.slash("stats", "Show message and voice stats for a user")
+                .addOptions(new OptionData(OptionType.USER, "user", "Target user", false))
+                .setDefaultPermissions(DefaultMemberPermissions.ENABLED));
+        commands.add(Commands.slash(CMD_STATS_ZH, "\u986f\u793a\u4f7f\u7528\u8005\u7684\u8a0a\u606f\u8207\u8a9e\u97f3\u7d71\u8a08")
+                .addOptions(new OptionData(OptionType.USER, "user", "Target user", false))
+                .setDefaultPermissions(DefaultMemberPermissions.ENABLED));
+        commands.add(Commands.slash("top", "Open leaderboard menu")
+                .setDefaultPermissions(DefaultMemberPermissions.ENABLED));
+        commands.add(Commands.slash(CMD_LEADERBOARD_ZH, "\u958b\u555f\u6392\u884c\u699c\u9078\u55ae")
+                .setDefaultPermissions(DefaultMemberPermissions.ENABLED));
         return commands;
     }
 
@@ -4066,6 +4078,8 @@ public class MusicCommandListener extends ListenerAdapter {
             case CMD_USER_INFO_ZH -> "user-info";
             case CMD_ROLE_INFO_ZH -> "role-info";
             case CMD_SERVER_INFO_ZH -> "server-info";
+            case CMD_STATS_ZH -> "stats";
+            case CMD_LEADERBOARD_ZH -> "top";
             default -> name;
         };
     }
@@ -4187,7 +4201,9 @@ public class MusicCommandListener extends ListenerAdapter {
                 || "number-chain".equals(name)
                 || "user-info".equals(name)
                 || "role-info".equals(name)
-                || "server-info".equals(name);
+                || "server-info".equals(name)
+                || "stats".equals(name)
+                || "top".equals(name);
     }
 
     boolean isMusicCommandChannelAllowed(Guild guild, long channelId) {

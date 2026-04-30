@@ -70,6 +70,9 @@ final class InteractionRouter {
             case "user-info" -> owner.infoCommandHandler().handleUserInfo(event, lang);
             case "role-info" -> owner.infoCommandHandler().handleRoleInfo(event, lang);
             case "server-info" -> owner.infoCommandHandler().handleServerInfo(event, lang);
+            case "stats", "top" -> {
+                // handled by MessageStatsListener
+            }
             case "ticket" -> {
                 // handled by TicketListener
             }

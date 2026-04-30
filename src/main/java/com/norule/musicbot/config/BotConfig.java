@@ -25,6 +25,7 @@ import java.util.Set;
 public class BotConfig {
     private final String token;
     private final String prefix;
+    private final boolean debug;
     private final Long commandGuildId;
     private final String guildSettingsDir;
     private final String languageDir;
@@ -41,9 +42,11 @@ public class BotConfig {
     private final PrivateRoom privateRoom;
     private final Ticket ticket;
     private final Web web;
+    private final Stats stats;
 
     private BotConfig(String token,
                       String prefix,
+                      boolean debug,
                       Long commandGuildId,
                       String guildSettingsDir,
                       String languageDir,
@@ -59,9 +62,11 @@ public class BotConfig {
                       Music music,
                       PrivateRoom privateRoom,
                       Ticket ticket,
-                      Web web) {
+                      Web web,
+                      Stats stats) {
         this.token = token;
         this.prefix = prefix;
+        this.debug = debug;
         this.commandGuildId = commandGuildId;
         this.guildSettingsDir = guildSettingsDir;
         this.languageDir = languageDir;
@@ -78,6 +83,7 @@ public class BotConfig {
         this.privateRoom = privateRoom;
         this.ticket = ticket;
         this.web = web;
+        this.stats = stats;
     }
 
     public static BotConfig load(Path path) {
@@ -99,6 +105,7 @@ public class BotConfig {
             }
 
             String prefix = getString(root, "prefix", "!");
+            boolean debug = getBoolean(root, "debug", false);
             Long commandGuildId = toLong(root.get("commandGuildId"));
             DataPaths dataPaths = DataPaths.fromConfig(root);
             String guildSettingsDir = dataPaths.getGuildSettingsDir();
@@ -115,9 +122,10 @@ public class BotConfig {
             PrivateRoom privateRoom = PrivateRoom.fromMap(asMap(root.get("privateRoom")), null);
             Ticket ticket = Ticket.fromMap(asMap(root.get("ticket")), null);
             Web web = Web.fromMap(asMap(root.get("web")), null);
+            Stats stats = Stats.fromMap(asMap(root.get("stats")), null);
 
-            return new BotConfig(token, prefix, commandGuildId, guildSettingsDir, languageDir, dataPaths, defaultLanguage, commandCooldownSeconds, numberChainReactionDelayMillis, botProfile, developers,
-                    notifications, welcome, messageLogs, music, privateRoom, ticket, web);
+            return new BotConfig(token, prefix, debug, commandGuildId, guildSettingsDir, languageDir, dataPaths, defaultLanguage, commandCooldownSeconds, numberChainReactionDelayMillis, botProfile, developers,
+                    notifications, welcome, messageLogs, music, privateRoom, ticket, web, stats);
         } catch (IOException e) {
             throw new IllegalStateException("Failed to read config.yml: " + path.toAbsolutePath(), e);
         }
@@ -446,6 +454,10 @@ public class BotConfig {
         return prefix;
     }
 
+    public boolean isDebug() {
+        return debug;
+    }
+
     public Long getCommandGuildId() {
         return commandGuildId;
     }
@@ -650,6 +662,117 @@ public class BotConfig {
 
     public Web getWeb() {
         return web;
+    }
+
+    public Stats getStats() {
+        return stats;
+    }
+
+    public static class Stats {
+        private final String storage;
+        private final Mysql mysql;
+        private final Sqlite sqlite;
+
+        private Stats(String storage, Mysql mysql, Sqlite sqlite) {
+            this.storage = (storage == null || storage.isBlank()) ? "mysql" : storage.trim().toLowerCase(Locale.ROOT);
+            this.mysql = mysql == null ? Mysql.defaultValues() : mysql;
+            this.sqlite = sqlite == null ? Sqlite.defaultValues() : sqlite;
+        }
+
+        public static Stats fromMap(Map<String, Object> map, Stats fallback) {
+            Stats defaults = fallback == null ? defaultValues() : fallback;
+            return new Stats(
+                    getString(map, "storage", defaults.getStorage()),
+                    Mysql.fromMap(asMap(map.get("mysql")), defaults.getMysql()),
+                    Sqlite.fromMap(asMap(map.get("sqlite")), defaults.getSqlite())
+            );
+        }
+
+        public static Stats defaultValues() {
+            return new Stats("sqlite", Mysql.defaultValues(), Sqlite.defaultValues());
+        }
+
+        public String getStorage() {
+            return storage;
+        }
+
+        public Mysql getMysql() {
+            return mysql;
+        }
+
+        public Sqlite getSqlite() {
+            return sqlite;
+        }
+
+        public static class Mysql {
+            private final String jdbcUrl;
+            private final String username;
+            private final String password;
+            private final int poolSize;
+
+            private Mysql(String jdbcUrl, String username, String password, int poolSize) {
+                this.jdbcUrl = jdbcUrl;
+                this.username = username;
+                this.password = password;
+                this.poolSize = Math.max(2, poolSize);
+            }
+
+            public static Mysql fromMap(Map<String, Object> map, Mysql fallback) {
+                Mysql defaults = fallback == null ? defaultValues() : fallback;
+                return new Mysql(
+                        getString(map, "jdbcUrl", defaults.getJdbcUrl()),
+                        getString(map, "username", defaults.getUsername()),
+                        getString(map, "password", defaults.getPassword()),
+                        getInt(map, "poolSize", defaults.getPoolSize())
+                );
+            }
+
+            public static Mysql defaultValues() {
+                return new Mysql(
+                        "jdbc:mysql://localhost:3306/discord_bot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC",
+                        "root",
+                        "",
+                        8
+                );
+            }
+
+            public String getJdbcUrl() {
+                return jdbcUrl;
+            }
+
+            public String getUsername() {
+                return username;
+            }
+
+            public String getPassword() {
+                return password;
+            }
+
+            public int getPoolSize() {
+                return poolSize;
+            }
+        }
+
+        public static class Sqlite {
+            private final String path;
+
+            private Sqlite(String path) {
+                this.path = (path == null || path.isBlank()) ? "stats/message-stats.db" : path.trim();
+            }
+
+            public static Sqlite fromMap(Map<String, Object> map, Sqlite fallback) {
+                Sqlite defaults = fallback == null ? defaultValues() : fallback;
+                return new Sqlite(getString(map, "path", defaults.getPath()));
+            }
+
+            public static Sqlite defaultValues() {
+                return new Sqlite("stats/message-stats.db");
+            }
+
+            public String getPath() {
+                return path;
+            }
+        }
     }
 
     public static class Notifications {
