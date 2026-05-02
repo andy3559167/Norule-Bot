@@ -17,6 +17,8 @@ target/
 /cache/
 /LOG/
 /certs/
+/guild/
+/docs/
 .m2/
 tmp-settings.xml
 config.backup-*.yml
