@@ -27,6 +27,7 @@ import com.norule.musicbot.discord.bot.gateway.command.moderation.AntiDuplicateC
 import com.norule.musicbot.discord.bot.gateway.command.moderation.DeleteMessagesCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.moderation.WarningCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.privateroom.PrivateRoomSettingsCommandHandler;
+import com.norule.musicbot.discord.bot.gateway.command.report.ReportCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.SettingsCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.menu.SettingsLanguageMenuHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.menu.SettingsNumberChainMenuHandler;
@@ -239,6 +240,9 @@ public class MusicCommandService extends ListenerAdapter {
     }
     public WordChainCommandHandler wordChainCommandHandler() {
         return commandHandlers.wordChainCommandHandler();
+    }
+    public ReportCommandHandler reportCommandHandler() {
+        return commandHandlers.reportCommandHandler();
     }
     public SettingsWordChainMenuHandler wordChainMenuHandler() {
         return commandHandlers.wordChainMenuHandler();

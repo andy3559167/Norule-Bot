@@ -1496,22 +1496,32 @@ public String getToken() {
 
     public static class Developers {
         private final List<Long> ids;
+        private final Long developerChannelId;
 
-        private Developers(List<Long> ids) {
+        private Developers(List<Long> ids, Long developerChannelId) {
             this.ids = ids == null ? List.of() : List.copyOf(ids);
+            this.developerChannelId = developerChannelId;
         }
 
         public static Developers fromMap(Map<String, Object> map, Developers fallback) {
             Developers defaults = fallback == null ? defaultValues() : fallback;
-            return new Developers(getLongList(map, "ids", defaults.getIds()));
+            return new Developers(
+                    getLongList(map, "ids", defaults.getIds()),
+                    getLong(map, "developerChannelId", defaults.getDeveloperChannelId())
+            );
         }
 
         public static Developers defaultValues() {
-            return new Developers(List.of());
+            return new Developers(List.of(), null);
         }
 
         public List<Long> getIds() {
             return ids;
+        }
+
+        // Destination channel for /report submissions (bug reports and feedback).
+        public Long getDeveloperChannelId() {
+            return developerChannelId;
         }
 
         public boolean isDeveloper(long userId) {

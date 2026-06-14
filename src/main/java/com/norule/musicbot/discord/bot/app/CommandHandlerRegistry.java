@@ -19,6 +19,7 @@ import com.norule.musicbot.discord.bot.gateway.command.music.MusicStatsCommandHa
 import com.norule.musicbot.discord.bot.gateway.command.music.MusicTextResolver;
 import com.norule.musicbot.discord.bot.gateway.command.music.PlaylistCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.privateroom.PrivateRoomSettingsCommandHandler;
+import com.norule.musicbot.discord.bot.gateway.command.report.ReportCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.SettingsCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.menu.SettingsLanguageMenuHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.menu.SettingsNumberChainMenuHandler;
@@ -51,6 +52,7 @@ class CommandHandlerRegistry {
     private final MusicStatsCommandHandler musicStatsCommandHandler;
     private final NumberChainCommandHandler numberChainCommandHandler;
     private final WordChainCommandHandler wordChainCommandHandler;
+    private final ReportCommandHandler reportCommandHandler;
 
     CommandHandlerRegistry(MusicCommandService service,
                            MusicPanelController musicPanelController,
@@ -84,6 +86,9 @@ class CommandHandlerRegistry {
         this.wordChainCommandHandler = service.wordChainOps() != null
                 ? new WordChainCommandHandler(service.wordChainOps(), service::i18nService)
                 : null;
+        this.reportCommandHandler = new ReportCommandHandler(
+                service::i18nService,
+                () -> service.runtimeConfigSnapshot().getReportDeveloperChannelId());
     }
 
     SettingsCommandHandler settingsCommandHandler() { return settingsCommandHandler; }
@@ -107,4 +112,5 @@ class CommandHandlerRegistry {
     MusicStatsCommandHandler musicStatsCommandHandler() { return musicStatsCommandHandler; }
     NumberChainCommandHandler numberChainCommandHandler() { return numberChainCommandHandler; }
     WordChainCommandHandler wordChainCommandHandler() { return wordChainCommandHandler; }
+    ReportCommandHandler reportCommandHandler() { return reportCommandHandler; }
 }

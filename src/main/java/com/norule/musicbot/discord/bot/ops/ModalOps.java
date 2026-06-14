@@ -34,6 +34,10 @@ public final class ModalOps {
             owner.warningCommandHandler().handleWarningReasonModal(event, lang);
             return;
         }
+        if (modalId.startsWith(ComponentIds.REPORT_MODAL_PREFIX)) {
+            owner.reportCommandHandler().handleReportModal(event, lang);
+            return;
+        }
         if (MusicCommandService.WELCOME_MODAL_ID.equals(modalId)) {
             owner.welcomeCommandHandler().handleWelcomeModal(event, lang);
         }

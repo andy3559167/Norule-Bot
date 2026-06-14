@@ -176,7 +176,28 @@ public final class DiscordCommandCatalog {
                 .setDefaultPermissions(DefaultMemberPermissions.ENABLED));
         commands.add(Commands.slash(CommandNames.CMD_LEADERBOARD_ZH, "\u958b\u555f\u6392\u884c\u699c\u9078\u55ae")
                 .setDefaultPermissions(DefaultMemberPermissions.ENABLED));
+        commands.add(buildReportCommand(CommandNames.CMD_REPORT));
+        commands.add(buildReportCommand(CommandNames.CMD_REPORT_ZH));
         return commands;
+    }
+
+    private SlashCommandData buildReportCommand(String commandName) {
+        boolean zh = CommandNames.CMD_REPORT_ZH.equals(commandName);
+        OptionData typeOption = new OptionData(OptionType.STRING, CommandOptions.TYPE,
+                zh ? "\u56de\u5831\u985e\u578b" : "Report type", true)
+                .addChoices(
+                        new Command.Choice(zh ? "BUG \u56de\u5831" : "bug", "bug"),
+                        new Command.Choice(zh ? "\u610f\u898b\u56de\u994b" : "feedback", "feedback")
+                );
+        if (zh) {
+            typeOption.setNameLocalization(DiscordLocale.CHINESE_TAIWAN, "\u985e\u578b");
+            typeOption.setNameLocalization(DiscordLocale.CHINESE_CHINA, "\u7c7b\u578b");
+        }
+        return Commands.slash(commandName,
+                        zh ? "\u56de\u5831 BUG \u6216\u63d0\u4f9b\u610f\u898b\u56de\u994b\u7d66\u958b\u767c\u8005"
+                                : "Report a bug or send feedback to the developers")
+                .setDefaultPermissions(DefaultMemberPermissions.ENABLED)
+                .addOptions(typeOption);
     }
 
     private SlashCommandData buildNumberChainCommand(String commandName) {

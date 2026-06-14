@@ -10,4 +10,5 @@ public final class CommandOptions {
     public static final String ACTION = "action";
     public static final String PREFIX = "prefix";
     public static final String LOG_SETTING = "log-setting";
+    public static final String TYPE = "type";
 }

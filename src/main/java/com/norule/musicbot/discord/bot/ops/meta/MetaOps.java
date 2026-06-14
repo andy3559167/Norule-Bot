@@ -40,6 +40,10 @@ public final class MetaOps {
                 owner.minecraftStatusCommandHandler().handleStatusSlash(event, lang);
                 yield true;
             }
+            case "report" -> {
+                owner.reportCommandHandler().handleReportSlash(event, lang);
+                yield true;
+            }
             default -> false;
         };
     }

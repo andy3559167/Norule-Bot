@@ -64,4 +64,6 @@ public final class CommandNames {
     public static final String CMD_SHORT_URL_ZH = "\u77ed\u7db2\u5740";
     public static final String CMD_MINECRAFT_STATUS = "mcstatus";
     public static final String CMD_MINECRAFT_STATUS_ZH = "mc\u72c0\u614b";
+    public static final String CMD_REPORT = "report";
+    public static final String CMD_REPORT_ZH = "\u56de\u5831";
 }

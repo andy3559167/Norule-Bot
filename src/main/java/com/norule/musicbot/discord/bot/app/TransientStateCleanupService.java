@@ -38,6 +38,7 @@ class TransientStateCleanupService {
         service.playbackCommandHandler().cleanupExpiredRequests(now);
         service.playlistCommandHandler().cleanupExpiredRequests(now);
         service.settingsCommandHandler().cleanupExpiredRequests(now);
+        service.reportCommandHandler().cleanupExpiredRequests(now);
         service.musicService().cleanupTransientCaches(nowMillis);
     }
 }

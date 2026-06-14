@@ -44,4 +44,5 @@ public final class ComponentIds {
     public static final String PANEL_VOLUME_UP = "panel:volume:up";
     public static final String PANEL_REFRESH = "panel:refresh";
     public static final String PANEL_SHUFFLE = "panel:shuffle";
+    public static final String REPORT_MODAL_PREFIX = "report:modal:";
 }

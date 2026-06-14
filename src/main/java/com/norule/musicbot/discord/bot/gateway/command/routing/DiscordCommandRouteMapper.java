@@ -47,6 +47,7 @@ public class DiscordCommandRouteMapper {
             case CommandNames.CMD_LEADERBOARD_ZH    -> "top";
             case CommandNames.CMD_SHORT_URL_ZH      -> "url";
             case CommandNames.CMD_MINECRAFT_STATUS_ZH -> "mcstatus";
+            case CommandNames.CMD_REPORT_ZH         -> CommandNames.CMD_REPORT;
             default -> name;
         };
     }
@@ -172,6 +173,7 @@ public class DiscordCommandRouteMapper {
                 || "url".equals(name)
                 || "mcstatus".equals(name)
                 || "stats".equals(name)
-                || "top".equals(name);
+                || "top".equals(name)
+                || CommandNames.CMD_REPORT.equals(name);
     }
 }

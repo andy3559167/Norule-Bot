@@ -21,6 +21,7 @@ public final class RuntimeConfigSnapshot {
     private final BotConfig.PrivateRoom defaultPrivateRoom;
     private final BotConfig.Ticket defaultTicket;
     private final BotConfig.MinecraftStatus minecraftStatus;
+    private final Long reportDeveloperChannelId;
 
     public RuntimeConfigSnapshot(String prefix,
                                  int commandCooldownSeconds,
@@ -35,7 +36,8 @@ public final class RuntimeConfigSnapshot {
                                  BotConfig.Music defaultMusic,
                                  BotConfig.PrivateRoom defaultPrivateRoom,
                                  BotConfig.Ticket defaultTicket,
-                                 BotConfig.MinecraftStatus minecraftStatus) {
+                                 BotConfig.MinecraftStatus minecraftStatus,
+                                 Long reportDeveloperChannelId) {
         this.prefix = prefix == null ? "!" : prefix;
         this.commandCooldownSeconds = Math.max(0, commandCooldownSeconds);
         this.defaultLanguage = defaultLanguage == null ? "en" : defaultLanguage;
@@ -50,6 +52,7 @@ public final class RuntimeConfigSnapshot {
         this.defaultPrivateRoom = defaultPrivateRoom == null ? BotConfig.PrivateRoom.defaultValues() : defaultPrivateRoom;
         this.defaultTicket = defaultTicket == null ? BotConfig.Ticket.defaultValues() : defaultTicket;
         this.minecraftStatus = minecraftStatus == null ? BotConfig.MinecraftStatus.defaultValues() : minecraftStatus;
+        this.reportDeveloperChannelId = reportDeveloperChannelId;
     }
 
     public static RuntimeConfigSnapshot from(BotConfig config, Path baseDir) {
@@ -59,6 +62,9 @@ public final class RuntimeConfigSnapshot {
             ids.addAll(config.getDevelopers().getIds());
         }
         String description = config.getBotProfile() == null ? "" : config.getBotProfile().getDescription();
+        Long reportDeveloperChannelId = config.getDevelopers() == null
+                ? null
+                : config.getDevelopers().getDeveloperChannelId();
         return new RuntimeConfigSnapshot(
                 config.getPrefix(),
                 config.getCommandCooldownSeconds(),
@@ -73,7 +79,8 @@ public final class RuntimeConfigSnapshot {
                 config.getMusic(),
                 config.getPrivateRoom(),
                 config.getTicket(),
-                config.getMinecraftStatus()
+                config.getMinecraftStatus(),
+                reportDeveloperChannelId
         );
     }
 
@@ -91,4 +98,7 @@ public final class RuntimeConfigSnapshot {
     public BotConfig.PrivateRoom getDefaultPrivateRoom() { return defaultPrivateRoom; }
     public BotConfig.Ticket getDefaultTicket() { return defaultTicket; }
     public BotConfig.MinecraftStatus getMinecraftStatus() { return minecraftStatus; }
+
+    // Destination channel id for /report submissions; null/0 means the feature is unconfigured.
+    public Long getReportDeveloperChannelId() { return reportDeveloperChannelId; }
 }
