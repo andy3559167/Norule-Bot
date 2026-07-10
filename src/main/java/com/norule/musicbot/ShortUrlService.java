@@ -1,6 +1,8 @@
 package com.norule.musicbot;
 
 import com.norule.musicbot.domain.shorturl.ShortUrlDomainService;
+import com.norule.musicbot.domain.shorturl.ImageShare;
+import com.norule.musicbot.service.shorturl.ImageShareService;
 import com.norule.musicbot.shorturl.ShortUrlRepository;
 
 import java.net.URI;
@@ -41,6 +43,7 @@ public final class ShortUrlService {
 
     private final ShortUrlDomainService domainService = new ShortUrlDomainService();
     private final ShortUrlRepository repository;
+    private final ImageShareService imageShareService;
     private final AtomicReference<Options> options = new AtomicReference<>();
     private volatile long lastCleanupAt = 0L;
 
@@ -56,10 +59,15 @@ public final class ShortUrlService {
     }
 
     public ShortUrlService(ShortUrlRepository repository, Options options) {
+        this(repository, options, null);
+    }
+
+    public ShortUrlService(ShortUrlRepository repository, Options options, ImageShareService imageShareService) {
         if (repository == null) {
             throw new IllegalArgumentException("repository cannot be null");
         }
         this.repository = repository;
+        this.imageShareService = imageShareService;
         this.options.set(options == null
                 ? new Options(
                 true,
@@ -176,9 +184,41 @@ public final class ShortUrlService {
         this.options.set(options);
     }
 
+    public ImageShareService.UploadResult createImageShare(ImageShareService.Upload upload) {
+        if (imageShareService == null) {
+            return new ImageShareService.UploadResult(null, ImageShareService.UploadError.DISABLED);
+        }
+        return imageShareService.create(upload);
+    }
+
+    public ImageShare resolveImageShare(String code) {
+        return imageShareService == null ? null : imageShareService.resolve(code);
+    }
+
+    public java.io.InputStream openImageShare(ImageShare imageShare) {
+        return imageShareService == null ? null : imageShareService.open(imageShare);
+    }
+
+    public boolean verifyImageSharePassword(ImageShare imageShare, String password) {
+        return imageShareService != null && imageShareService.verifyPassword(imageShare, password);
+    }
+
+    public ImageShareService.Options imageShareOptions() {
+        return imageShareService == null ? null : imageShareService.options();
+    }
+
+    public void updateImageShareOptions(ImageShareService.Options options) {
+        if (imageShareService != null) {
+            imageShareService.updateOptions(options);
+        }
+    }
+
     public void cleanupExpired() {
         long now = System.currentTimeMillis();
         repository.cleanupExpired(now);
+        if (imageShareService != null) {
+            imageShareService.cleanupExpired();
+        }
         lastCleanupAt = now;
     }
 
@@ -191,6 +231,9 @@ public final class ShortUrlService {
                 return;
             }
             repository.cleanupExpired(now);
+            if (imageShareService != null) {
+                imageShareService.cleanupExpired();
+            }
             lastCleanupAt = now;
         }
     }

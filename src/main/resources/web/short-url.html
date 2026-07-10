@@ -58,6 +58,38 @@
                 class="primary inline-flex items-center justify-center min-h-[54px] px-6 rounded-[18px] text-base leading-[1.3] whitespace-nowrap"
               >複製</button>
             </div>
+            </div>
+        </section>
+
+        <section class="settings-group mt-4">
+          <h2 id="imageShareTitle" class="settings-group-title mb-2">Image Share</h2>
+          <p id="imageShareSubtitle" class="muted m-0 mb-3">Upload an image and get a short sharing link.</p>
+          <form id="imageShareForm" class="grid gap-3">
+            <label class="field">
+              <span id="imageFileLabel">Image</span>
+              <input id="imageFile" name="image" type="file" accept="image/png,image/jpeg,image/gif,image/webp" required />
+              <small id="imageLimitHint" class="muted"></small>
+            </label>
+            <label class="field">
+              <span id="imageRetentionLabel">Retention (hours)</span>
+              <input id="imageRetentionHours" name="retentionHours" type="number" min="1" step="1" value="1" required />
+              <small id="imageRetentionHint" class="muted"></small>
+            </label>
+            <label class="inline-flex items-center gap-2 text-sm text-[var(--muted)]">
+              <input id="imagePasswordProtected" name="passwordProtected" type="checkbox" />
+              <span id="imagePasswordProtectedLabel">Protect with password</span>
+            </label>
+            <label id="imagePasswordField" class="field hidden">
+              <span id="imagePasswordLabel">Password</span>
+              <input id="imagePassword" name="password" type="password" minlength="4" maxlength="128" />
+              <small id="imagePasswordHint" class="muted"></small>
+            </label>
+            <button id="createImageShareBtn" type="submit" class="primary w-full sm:w-auto">Create Image Share Link</button>
+          </form>
+          <p id="imageErrorText" class="hidden text-sm text-red-300 m-0 mt-3"></p>
+          <div id="imageResultCard" class="hidden mt-3 grid gap-2">
+            <a id="imageResultUrl" class="text-cyan-200 break-all hover:underline" href="#" target="_blank" rel="noreferrer noopener"></a>
+            <p class="muted m-0"><span id="imageExpiresLabel">Expires</span>: <span id="imageExpiresAt"></span></p>
           </div>
         </section>
       </article>

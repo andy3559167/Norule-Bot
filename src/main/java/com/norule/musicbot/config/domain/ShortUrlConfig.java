@@ -2,6 +2,7 @@ package com.norule.musicbot.config.domain;
 
 import com.norule.musicbot.ShortUrlService;
 import com.norule.musicbot.config.BotConfig;
+import com.norule.musicbot.service.shorturl.ImageShareService;
 import java.util.Locale;
 
 public final class ShortUrlConfig {
@@ -34,6 +35,34 @@ public final class ShortUrlConfig {
         public String getPath() { return path; }
     }
 
+    public static final class Image {
+        private final boolean enabled;
+        private final int defaultRetentionHours;
+        private final int maxRetentionDays;
+        private final int maxFileSizeMb;
+        private final String storagePath;
+
+        public Image(boolean enabled,
+                     int defaultRetentionHours,
+                     int maxRetentionDays,
+                     int maxFileSizeMb,
+                     String storagePath) {
+            this.enabled = enabled;
+            this.maxRetentionDays = Math.max(1, Math.min(365, maxRetentionDays));
+            this.defaultRetentionHours = Math.max(1, Math.min(this.maxRetentionDays * 24, defaultRetentionHours));
+            this.maxFileSizeMb = Math.max(1, Math.min(20, maxFileSizeMb));
+            this.storagePath = storagePath == null || storagePath.isBlank()
+                    ? "data/short-url-images"
+                    : storagePath.trim();
+        }
+
+        public boolean isEnabled() { return enabled; }
+        public int getDefaultRetentionHours() { return defaultRetentionHours; }
+        public int getMaxRetentionDays() { return maxRetentionDays; }
+        public int getMaxFileSizeMb() { return maxFileSizeMb; }
+        public String getStoragePath() { return storagePath; }
+    }
+
     private final String storage;
     private final boolean enabled;
     private final String bindHost;
@@ -44,6 +73,7 @@ public final class ShortUrlConfig {
     private final boolean dedupe;
     private final int ttlDays;
     private final int cleanupIntervalMinutes;
+    private final Image image;
     private final Mysql mysql;
     private final Sqlite sqlite;
 
@@ -57,6 +87,23 @@ public final class ShortUrlConfig {
                           boolean dedupe,
                           int ttlDays,
                           int cleanupIntervalMinutes,
+                          Mysql mysql,
+                          Sqlite sqlite) {
+        this(enabled, bindHost, bindPort, publicBaseUrl, codeLength, allowPrivateTargets, storage, dedupe,
+                ttlDays, cleanupIntervalMinutes, new Image(true, 1, 365, 20, "data/short-url-images"), mysql, sqlite);
+    }
+
+    public ShortUrlConfig(boolean enabled,
+                          String bindHost,
+                          int bindPort,
+                          String publicBaseUrl,
+                          int codeLength,
+                          boolean allowPrivateTargets,
+                          String storage,
+                          boolean dedupe,
+                          int ttlDays,
+                          int cleanupIntervalMinutes,
+                          Image image,
                           Mysql mysql,
                           Sqlite sqlite) {
         this.enabled = enabled;
@@ -74,6 +121,7 @@ public final class ShortUrlConfig {
         this.dedupe = dedupe;
         this.ttlDays = Math.max(1, ttlDays);
         this.cleanupIntervalMinutes = Math.max(1, cleanupIntervalMinutes);
+        this.image = image == null ? new Image(true, 1, 365, 20, "data/short-url-images") : image;
         this.mysql = mysql == null ? new Mysql("", "", "", 8) : mysql;
         this.sqlite = sqlite == null ? new Sqlite("data/norule.db") : sqlite;
     }
@@ -90,6 +138,13 @@ public final class ShortUrlConfig {
         this.dedupe = source.isDedupe();
         this.ttlDays = source.getTtlDays();
         this.cleanupIntervalMinutes = source.getCleanupIntervalMinutes();
+        this.image = new Image(
+                source.getImage().isEnabled(),
+                source.getImage().getDefaultRetentionHours(),
+                source.getImage().getMaxRetentionDays(),
+                source.getImage().getMaxFileSizeMb(),
+                source.getImage().getStoragePath()
+        );
         this.mysql = new Mysql(
                 source.getMysql().getJdbcUrl(),
                 source.getMysql().getUsername(),
@@ -110,6 +165,17 @@ public final class ShortUrlConfig {
         );
     }
 
+    public ImageShareService.Options toImageShareOptions() {
+        return new ImageShareService.Options(
+                image.isEnabled(),
+                image.getDefaultRetentionHours() * 60L * 60L * 1000L,
+                image.getMaxRetentionDays() * 24L * 60L * 60L * 1000L,
+                image.getMaxFileSizeMb() * 1024L * 1024L,
+                cleanupIntervalMinutes * 60L * 1000L,
+                codeLength
+        );
+    }
+
     public boolean isEnabled() { return enabled; }
     public String getBindHost() { return bindHost; }
     public int getBindPort() { return bindPort; }
@@ -124,6 +190,7 @@ public final class ShortUrlConfig {
     public boolean isDedupe() { return dedupe; }
     public int getTtlDays() { return ttlDays; }
     public int getCleanupIntervalMinutes() { return cleanupIntervalMinutes; }
+    public Image getImage() { return image; }
     public Mysql getMysql() { return mysql; }
     public Sqlite getSqlite() { return sqlite; }
 

@@ -28,9 +28,14 @@ import com.norule.musicbot.domain.stats.SqliteMessageStatsRepository;
 import com.norule.musicbot.web.infra.WebControlServer;
 import com.norule.musicbot.web.infra.WebSettings;
 import com.norule.musicbot.shorturl.MySqlShortUrlRepository;
+import com.norule.musicbot.shorturl.ImageShareRepository;
+import com.norule.musicbot.shorturl.MySqlImageShareRepository;
 import com.norule.musicbot.shorturl.ShortUrlRepository;
+import com.norule.musicbot.shorturl.SqliteImageShareRepository;
 import com.norule.musicbot.shorturl.SqliteShortUrlRepository;
+import com.norule.musicbot.shorturl.infra.FileSystemImageShareStorage;
 import com.norule.musicbot.shorturl.infra.ShortUrlGatewayServer;
+import com.norule.musicbot.service.shorturl.ImageShareService;
 import com.norule.musicbot.storage.sqlite.GuildSettingsSqliteRepository;
 import com.norule.musicbot.storage.sqlite.HoneypotSqliteRepository;
 import com.norule.musicbot.storage.sqlite.ModerationSqliteRepository;
@@ -648,7 +653,9 @@ public final class RuntimeBootstrap {
             }
             ShortUrlService shortUrlService = SHORT_URL_SERVICE.get();
             if (shortUrlService != null) {
-                shortUrlService.updateOptions(new ShortUrlConfig(reloaded.getShortUrl()).toOptions());
+                ShortUrlConfig shortUrlConfig = new ShortUrlConfig(reloaded.getShortUrl());
+                shortUrlService.updateOptions(shortUrlConfig.toOptions());
+                shortUrlService.updateImageShareOptions(shortUrlConfig.toImageShareOptions());
             }
             context.musicCommandListener().reloadRuntimeConfig(snapshot);
             startActivityRotation(context.jda(), reloaded.getBotProfile());
@@ -947,7 +954,18 @@ public final class RuntimeBootstrap {
     private static ShortUrlService createShortUrlService(BotConfig config, Path baseDir) {
         ShortUrlConfig shortUrlConfig = new ShortUrlConfig(config.getShortUrl());
         ShortUrlRepository repository = createShortUrlRepository(shortUrlConfig, baseDir);
-        return new ShortUrlService(repository, shortUrlConfig.toOptions());
+        ImageShareService imageShareService = createImageShareService(shortUrlConfig, repository, baseDir);
+        return new ShortUrlService(repository, shortUrlConfig.toOptions(), imageShareService);
+    }
+
+    private static ImageShareService createImageShareService(ShortUrlConfig config,
+                                                              ShortUrlRepository shortUrlRepository,
+                                                              Path baseDir) {
+        ImageShareRepository imageRepository = createImageShareRepository(config, baseDir);
+        FileSystemImageShareStorage storage = new FileSystemImageShareStorage(
+                resolveDataPath(baseDir, config.getImage().getStoragePath())
+        );
+        return new ImageShareService(imageRepository, shortUrlRepository, storage, config.toImageShareOptions());
     }
 
     private static ShortUrlRepository createShortUrlRepository(ShortUrlConfig config, Path baseDir) {
@@ -963,6 +981,21 @@ public final class RuntimeBootstrap {
         }
         Path dbPath = resolveDataPath(baseDir, config.getSqlite().getPath());
         return new SqliteShortUrlRepository(dbPath);
+    }
+
+    private static ImageShareRepository createImageShareRepository(ShortUrlConfig config, Path baseDir) {
+        String storage = config.getStorage() == null ? STORAGE_SQLITE : config.getStorage().trim().toLowerCase(Locale.ROOT);
+        if ("mysql".equals(storage)) {
+            ShortUrlConfig.Mysql mysql = config.getMysql();
+            return new MySqlImageShareRepository(
+                    mysql.getJdbcUrl(),
+                    mysql.getUsername(),
+                    mysql.getPassword(),
+                    mysql.getPoolSize()
+            );
+        }
+        Path dbPath = resolveDataPath(baseDir, config.getSqlite().getPath());
+        return new SqliteImageShareRepository(dbPath);
     }
 
     private static void syncShortUrlGateway() {
