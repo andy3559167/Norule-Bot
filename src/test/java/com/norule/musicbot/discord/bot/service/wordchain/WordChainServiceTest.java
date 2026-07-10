@@ -19,6 +19,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -95,6 +96,30 @@ class WordChainServiceTest {
         assertEquals(WordChainValidationResult.WORD_NOT_FOUND, service.processMessage(7L, 77L, "elephantx").join().result());
         assertEquals(WordChainValidationResult.DICTIONARY_API_ERROR, service.processMessage(7L, 77L, "errorapi").join().result());
         assertEquals(WordChainValidationResult.OK, service.processMessage(7L, 77L, "eagle").join().result());
+    }
+
+    @Test
+    void duplicateWordIncludesOriginalUserAndUsageTimeAfterReload() throws Exception {
+        Path dir = Files.createTempDirectory("wordchain-usage");
+        FakeGateway gateway = new FakeGateway();
+        gateway.set("apple", DictionaryLookupResult.FOUND, 0);
+        WordChainService service = new WordChainService(
+                new WordChainStateRepository(dir),
+                new DictionaryApiService(gateway)
+        );
+        service.setChannel(17L, 170L).join();
+        service.processMessage(17L, 170L, 123L, "apple").join();
+
+        WordChainService reloaded = new WordChainService(
+                new WordChainStateRepository(dir),
+                new DictionaryApiService(gateway)
+        );
+        WordChainProcessResult duplicate = reloaded.processMessage(17L, 170L, 456L, "apple").join();
+
+        assertEquals(WordChainValidationResult.WORD_USED, duplicate.result());
+        assertNotNull(duplicate.priorWordUsage());
+        assertEquals(123L, duplicate.priorWordUsage().userId());
+        assertNotNull(duplicate.priorWordUsage().usedAt());
     }
 
     @Test

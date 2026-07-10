@@ -6,6 +6,7 @@ import com.norule.musicbot.domain.wordchain.WordChainPlayerStatsSnapshot;
 import com.norule.musicbot.domain.wordchain.WordChainProcessResult;
 import com.norule.musicbot.domain.wordchain.WordChainStatusSnapshot;
 import com.norule.musicbot.domain.wordchain.WordChainValidationResult;
+import com.norule.musicbot.domain.wordchain.WordChainWordUsage;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.components.actionrow.ActionRow;
@@ -149,7 +150,7 @@ public final class WordChainOps {
         long channelId = event.getChannel().getIdLong();
         long userId = event.getAuthor().getIdLong();
         String raw = event.getMessage().getContentRaw();
-        wordChainService.processMessage(guildId, channelId, userId, raw)
+        wordChainService.processMessage(guildId, channelId, userId, raw, event.getMessage().getTimeCreated().toInstant())
                 .thenAccept(result -> {
                     if (!result.handled() || result.result() == null) {
                         return;
@@ -350,9 +351,10 @@ public final class WordChainOps {
                 String word = result.word() == null ? "" : result.word();
                 boolean wrongStart = expected != null && !word.isBlank() && word.charAt(0) != expected;
                 if (wrongStart) {
-                    yield "開頭字母錯誤，應為 `" + expected + "`，且這個單字本局已使用過。";
+                    yield "開頭字母錯誤，應為 `" + expected + "`，且這個單字本局已使用過。"
+                            + duplicateUsageText(result.priorWordUsage());
                 }
-                yield "這個單字本局已使用過。";
+                yield "這個單字本局已使用過。" + duplicateUsageText(result.priorWordUsage());
             }
             case WRONG_START_LETTER -> "開頭字母錯誤，請用 `"
                     + (result.expectedStartLetter() == null ? "-" : result.expectedStartLetter()) + "` 開頭。";
@@ -360,6 +362,15 @@ public final class WordChainOps {
             case DICTIONARY_API_ERROR -> "字典服務暫時無法確認，請稍後再試";
             default -> "處理失敗，請稍後再試。";
         };
+    }
+
+    private String duplicateUsageText(WordChainWordUsage usage) {
+        if (usage == null || usage.userId() <= 0L || usage.usedAt() == null) {
+            return "";
+        }
+        long timestamp = usage.usedAt().getEpochSecond();
+        return "\n\n\u672c\u5c40\u4f7f\u7528\u7d00\u9304\uff1a<@" + usage.userId()
+                + "> \u65bc <t:" + timestamp + ":F>\uff08<t:" + timestamp + ":R>\uff09\u4f7f\u7528\u904e\u6b64\u55ae\u5b57\u3002";
     }
 
     private String formatRate(double rate) {

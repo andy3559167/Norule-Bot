@@ -9,6 +9,7 @@ import com.norule.musicbot.domain.wordchain.WordChainState;
 import com.norule.musicbot.domain.wordchain.WordChainStatusSnapshot;
 import com.norule.musicbot.domain.wordchain.WordChainValidationResult;
 
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -102,14 +103,31 @@ public final class WordChainService {
     }
 
     public CompletableFuture<WordChainProcessResult> processMessage(long guildId, long channelId, long userId, String contentRaw) {
-        return enqueue(guildId, () -> processQueued(guildId, channelId, userId, contentRaw));
+        return processMessage(guildId, channelId, userId, contentRaw, Instant.now());
+    }
+
+    public CompletableFuture<WordChainProcessResult> processMessage(
+            long guildId,
+            long channelId,
+            long userId,
+            String contentRaw,
+            Instant usedAt
+    ) {
+        Instant safeUsedAt = usedAt == null ? Instant.now() : usedAt;
+        return enqueue(guildId, () -> processQueued(guildId, channelId, userId, contentRaw, safeUsedAt));
     }
 
     public CompletableFuture<WordChainProcessResult> processMessage(long guildId, long channelId, String contentRaw) {
         return processMessage(guildId, channelId, 0L, contentRaw);
     }
 
-    private CompletableFuture<WordChainProcessResult> processQueued(long guildId, long channelId, long userId, String contentRaw) {
+    private CompletableFuture<WordChainProcessResult> processQueued(
+            long guildId,
+            long channelId,
+            long userId,
+            String contentRaw,
+            Instant usedAt
+    ) {
         WordChainState current = state(guildId);
         if (!current.isEnabled() || current.getChannelId() == null || !current.getChannelId().equals(channelId)) {
             return CompletableFuture.completedFuture(WordChainProcessResult.ignored());
@@ -142,12 +160,14 @@ public final class WordChainService {
                     if (lookup == DictionaryLookupResult.API_ERROR) {
                         return fail(guildId, current, userId, WordChainValidationResult.DICTIONARY_API_ERROR, word);
                     }
-                    WordChainState updated = current.acceptWord(word).recordAttempt(userId, WordChainValidationResult.OK);
+                    WordChainState updated = current.acceptWord(word, userId, usedAt)
+                            .recordAttempt(userId, WordChainValidationResult.OK);
                     persist(guildId, updated);
                     return new WordChainProcessResult(
                             true,
                             WordChainValidationResult.OK,
                             word,
+                            null,
                             expectedStart,
                             expectedStartLetter(updated),
                             updated.getChainCount()
@@ -164,6 +184,7 @@ public final class WordChainService {
                 true,
                 result,
                 word,
+                state.getWordUsage(word),
                 expectedStartLetter(state),
                 expectedStartLetter(state),
                 state.getChainCount()

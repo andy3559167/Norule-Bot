@@ -2,6 +2,7 @@ package com.norule.musicbot.discord.bot.service.wordchain;
 
 import com.norule.musicbot.domain.wordchain.WordChainState;
 import com.norule.musicbot.domain.wordchain.WordChainPlayerStats;
+import com.norule.musicbot.domain.wordchain.WordChainWordUsage;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -10,6 +11,7 @@ import java.io.InputStream;
 import java.io.Writer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -47,6 +49,18 @@ public final class WordChainStateRepository {
                     usedWords.add(value);
                 }
             }
+            LinkedHashMap<String, WordChainWordUsage> wordUsages = new LinkedHashMap<>();
+            Map<String, Object> usageMap = asMap(root.get("wordUsages"));
+            for (Map.Entry<String, Object> entry : usageMap.entrySet()) {
+                String word = readString(entry.getKey());
+                Map<String, Object> one = asMap(entry.getValue());
+                Long userId = readLong(one.get("userId"));
+                Long usedAtEpochMillis = readLong(one.get("usedAtEpochMillis"));
+                if (word.isBlank() || userId == null || userId <= 0L || usedAtEpochMillis == null || usedAtEpochMillis <= 0L) {
+                    continue;
+                }
+                wordUsages.put(word, new WordChainWordUsage(userId, Instant.ofEpochMilli(usedAtEpochMillis)));
+            }
             LinkedHashMap<Long, WordChainPlayerStats> playerStats = new LinkedHashMap<>();
             Map<String, Object> statsMap = asMap(root.get("playerStats"));
             for (Map.Entry<String, Object> entry : statsMap.entrySet()) {
@@ -60,7 +74,7 @@ public final class WordChainStateRepository {
                 long invalidCount = Math.max(0L, readLong(one.get("invalidCount"), 0L));
                 playerStats.put(userId, new WordChainPlayerStats(totalMessages, successCount, invalidCount));
             }
-            return new WordChainState(enabled, channelId, lastWord, chainCount, usedWords, playerStats);
+            return new WordChainState(enabled, channelId, lastWord, chainCount, usedWords, wordUsages, playerStats);
         } catch (Exception ignored) {
             return WordChainState.empty();
         }
@@ -75,6 +89,18 @@ public final class WordChainStateRepository {
         root.put("lastWord", state.getLastWord());
         root.put("chainCount", state.getChainCount());
         root.put("usedWords", new ArrayList<>(state.getUsedWords()));
+        Map<String, Object> usageMap = new LinkedHashMap<>();
+        for (Map.Entry<String, WordChainWordUsage> entry : state.getWordUsages().entrySet()) {
+            if (entry.getKey() == null || entry.getKey().isBlank() || entry.getValue() == null
+                    || entry.getValue().userId() <= 0L || entry.getValue().usedAt() == null) {
+                continue;
+            }
+            Map<String, Object> one = new LinkedHashMap<>();
+            one.put("userId", String.valueOf(entry.getValue().userId()));
+            one.put("usedAtEpochMillis", entry.getValue().usedAt().toEpochMilli());
+            usageMap.put(entry.getKey(), one);
+        }
+        root.put("wordUsages", usageMap);
         Map<String, Object> statsMap = new LinkedHashMap<>();
         for (Map.Entry<Long, WordChainPlayerStats> entry : state.getPlayerStats().entrySet()) {
             if (entry.getKey() == null || entry.getKey() <= 0L || entry.getValue() == null) {
