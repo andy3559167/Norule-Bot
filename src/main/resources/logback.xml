@@ -6,6 +6,9 @@
         </encoder>
     </appender>
 
+    <!-- This warning includes YouTube's full format JSON; retain only actual errors from this client. -->
+    <logger name="dev.lavalink.youtube.clients.skeleton.StreamingNonMusicClient" level="ERROR" />
+
     <!-- Configure root logger to output to console -->
     <root level="INFO">
         <appender-ref ref="STDOUT" />
