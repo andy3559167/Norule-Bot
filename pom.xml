@@ -23,7 +23,7 @@
         <external.lib.dir>${project.basedir}/lib</external.lib.dir>
         <jda.version>6.3.1</jda.version>
         <lavaplayer.version>2.2.6</lavaplayer.version>
-        <youtube.source.version>1.18.0</youtube.source.version>
+        <youtube.source.version>1.18.1</youtube.source.version>
         <lavasrc.version>4.8.1</lavasrc.version>
         <libdave.version>0.1.0</libdave.version>
         <snakeyaml.version>2.4</snakeyaml.version>

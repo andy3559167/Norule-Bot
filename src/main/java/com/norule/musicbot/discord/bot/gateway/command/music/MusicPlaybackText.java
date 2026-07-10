@@ -51,6 +51,21 @@ public final class MusicPlaybackText {
         if ("SPOTIFY_UNSUPPORTED_LINK".equalsIgnoreCase(rawError)) {
             return i18n().t(lang, "music.spotify_unsupported_link");
         }
+        if ("YOUTUBE_PRECHECK_BLOCKED".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.youtube_precheck_blocked");
+        }
+        if ("YOUTUBE_PRECHECK_TIMEOUT".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.youtube_precheck_timeout");
+        }
+        if ("YOUTUBE_PRECHECK_UNAVAILABLE".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.youtube_precheck_unavailable");
+        }
+        if ("YOUTUBE_PRECHECK_INVALID".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.youtube_precheck_invalid");
+        }
+        if ("YOUTUBE_PRECHECK_UNKNOWN".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.youtube_precheck_unknown");
+        }
         return i18n().t(lang, YoutubePlaybackErrorMapper.toMessageKey(rawError));
     }
 

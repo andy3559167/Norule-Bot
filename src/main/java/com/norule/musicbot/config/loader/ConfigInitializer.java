@@ -299,6 +299,8 @@ public final class ConfigInitializer {
                 out.add("# Global music integrations");
             } else if ("youtube:".equals(trimmed) && line.startsWith("  ")) {
                 out.add("  # YouTube source options");
+            } else if ("strictPrecheck:".equals(trimmed) && line.startsWith("    ")) {
+                out.add("    # Optional Lavalink youtube-source stream precheck before queueing a YouTube video");
             } else if ("spotify:".equals(trimmed) && line.startsWith("  ")) {
                 out.add("  # Spotify source options");
             } else if ("web:".equals(trimmed)) {

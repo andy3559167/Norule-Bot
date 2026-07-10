@@ -39,6 +39,11 @@ music:
   youtube_unavailable: "這部 YouTube 影片目前無法使用。"
   youtube_cipher_unreachable: "YouTube cipher server 無法連線，請先啟動 cipher server 或修正 music.youtube.cipherServer。"
   youtube_source_temporary_failure: "YouTube 來源暫時異常，請稍後再試。"
+  youtube_precheck_blocked: "此影片目前無法播放，可能原因是需要登入、YouTube Music Premium、地區限制，或 YouTube 暫時阻擋來源。已略過此影片。"
+  youtube_precheck_timeout: "YouTube 播放預檢逾時。因已啟用嚴格預檢，已略過此影片。"
+  youtube_precheck_unavailable: "YouTube 播放預檢目前無法使用。因已啟用嚴格預檢，已略過此影片。"
+  youtube_precheck_invalid: "這個 YouTube 連結不是有效的單一影片。"
+  youtube_precheck_unknown: "YouTube 播放預檢發生未預期錯誤，已略過此影片。"
   playback_failed: "無法播放 `{title}`：{error}"
   not_found: "找不到 `{query}` 的結果。"
   search_title: "搜尋結果"
@@ -625,6 +630,9 @@ moderation:
     content: "重複內容"
 
 number_chain:
+  status_title: "數字接龍狀態"
+  status_desc: "目前伺服器的數字接龍設定與進度。"
+  rules_summary: "成員必須在指定頻道依序送出下一個數字；同一位成員不能連續接龍兩次。"
   channel: "文字頻道"
   value: "數值"
   reset: "重設"
@@ -636,6 +644,11 @@ number_chain:
   result_set_enabled: "數字接龍狀態已更新：{status}"
   result_reset: "數字接龍已重設，請從 1 重新開始。"
   result_status: "數字接龍狀態：{status}\n頻道：{channel}\n下一個數字：`{next}`"
+
+word_chain:
+  status_title: "英文接龍狀態"
+  status_desc: "目前伺服器的英文接龍設定與進度。"
+  rules_summary: "成員必須送出以上一個單字結尾字母開頭的有效英文單字；重複使用過的單字不允許。"
 
 ticket:
   disabled: "客服單系統目前已停用。請使用 `/設定 選項:模組開關` 開啟客服單功能。"

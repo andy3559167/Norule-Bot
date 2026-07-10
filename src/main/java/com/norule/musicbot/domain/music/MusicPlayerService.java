@@ -66,6 +66,11 @@ public class MusicPlayerService {
     private static final String SPOTIFY_PERSONAL_PLAYLIST_ERROR_KEY = "SPOTIFY_PERSONAL_PLAYLIST_UNSUPPORTED";
     private static final String SPOTIFY_UNSUPPORTED_LINK_ERROR_KEY = "SPOTIFY_UNSUPPORTED_LINK";
     private static final String SPOTIFY_JAM_UNSUPPORTED_ERROR_KEY = "SPOTIFY_JAM_UNSUPPORTED";
+    private static final String YOUTUBE_PRECHECK_BLOCKED_ERROR_KEY = "YOUTUBE_PRECHECK_BLOCKED";
+    private static final String YOUTUBE_PRECHECK_TIMEOUT_ERROR_KEY = "YOUTUBE_PRECHECK_TIMEOUT";
+    private static final String YOUTUBE_PRECHECK_UNAVAILABLE_ERROR_KEY = "YOUTUBE_PRECHECK_UNAVAILABLE";
+    private static final String YOUTUBE_PRECHECK_INVALID_ERROR_KEY = "YOUTUBE_PRECHECK_INVALID";
+    private static final String YOUTUBE_PRECHECK_UNKNOWN_ERROR_KEY = "YOUTUBE_PRECHECK_UNKNOWN";
     private static final String STRICT_YOUTUBE_PLAYLIST_PREFIX = "https://www.youtube.com/playlist?list=";
     private static final long YOUTUBE_PLAYLIST_CACHE_TTL_MS = 30 * 60_000L;
     private static final int YOUTUBE_PLAYLIST_BATCH_SIZE = 25;
@@ -91,6 +96,11 @@ public class MusicPlayerService {
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(8))
             .build();
+    private final YouTubePlaybackPrecheckService youtubePrecheckService =
+            new YouTubePlaybackPrecheckService(() -> {
+                MusicConfig.Youtube config = youtubeConfig;
+                return config == null ? MusicConfig.Youtube.StrictPrecheck.fromLegacy(null) : config.getStrictPrecheck();
+            });
 
     public MusicPlayerService(Path dataDir,
                               LongToIntFunction historyLimitProvider,
@@ -147,6 +157,7 @@ public class MusicPlayerService {
         spotifyRateLimitUserCooldownUntil.entrySet().removeIf(entry -> entry.getValue() == null || entry.getValue() <= now);
         spotifyPlaylistCooldownByGuild.entrySet().removeIf(entry -> entry.getValue() == null || entry.getValue() <= now);
         youtubePlaylistCache.entrySet().removeIf(entry -> entry.getValue() == null || entry.getValue().expiresAtMs <= now);
+        youtubePrecheckService.cleanupExpired(Instant.ofEpochMilli(now));
         musicDataService.cleanupTransientCaches();
     }
 
@@ -624,9 +635,19 @@ public class MusicPlayerService {
                 return;
             }
         }
+        YouTubePlaybackPrecheckResult directPrecheck = youtubePrecheckService.check(identifier);
+        if (!directPrecheck.allowsQueue()) {
+            messageSender.accept("LOAD_FAILED:" + mapYouTubePrecheckFailure(directPrecheck));
+            return;
+        }
         playerManager.loadItemOrdered(guildMusicManager, identifier, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
+                YouTubePlaybackPrecheckResult precheck = precheckTrack(track, sourceLabel);
+                if (!precheck.allowsQueue()) {
+                    messageSender.accept("LOAD_FAILED:" + mapYouTubePrecheckFailure(precheck));
+                    return;
+                }
                 applyTrackMetadata(track, sourceLabel, requesterId, requesterName);
                 guildMusicManager.getScheduler().queue(track);
                 messageSender.accept(track.getInfo().title);
@@ -664,6 +685,11 @@ public class MusicPlayerService {
                 AudioTrack firstTrack = playlist.getSelectedTrack() != null
                         ? playlist.getSelectedTrack()
                         : playlist.getTracks().get(0);
+                YouTubePlaybackPrecheckResult precheck = precheckTrack(firstTrack, sourceLabel);
+                if (!precheck.allowsQueue()) {
+                    messageSender.accept("LOAD_FAILED:" + mapYouTubePrecheckFailure(precheck));
+                    return;
+                }
                 applyTrackMetadata(firstTrack, sourceLabel, requesterId, requesterName);
                 guildMusicManager.getScheduler().queue(firstTrack);
                 messageSender.accept(firstTrack.getInfo().title);
@@ -723,6 +749,35 @@ public class MusicPlayerService {
                 messageSender.accept("LOAD_FAILED:" + exception.getMessage());
             }
         });
+    }
+
+    private YouTubePlaybackPrecheckResult precheckTrack(AudioTrack track, String sourceLabel) {
+        if (track == null || track.getInfo() == null) {
+            return youtubePrecheckService.check(null);
+        }
+        AudioTrackInfo info = track.getInfo();
+        YouTubePlaybackPrecheckResult uriResult = youtubePrecheckService.check(info.uri);
+        if (uriResult.status() != YouTubePlaybackPrecheckStatus.SKIPPED) {
+            return uriResult;
+        }
+        if ("youtube".equalsIgnoreCase(normalizeSourceLabel(sourceLabel))
+                && YouTubePlaybackPrecheckService.isValidVideoId(info.identifier)) {
+            return youtubePrecheckService.check(info.identifier);
+        }
+        return uriResult;
+    }
+
+    private String mapYouTubePrecheckFailure(YouTubePlaybackPrecheckResult result) {
+        if (result == null || result.status() == null) {
+            return YOUTUBE_PRECHECK_UNKNOWN_ERROR_KEY;
+        }
+        return switch (result.status()) {
+            case BLOCKED -> YOUTUBE_PRECHECK_BLOCKED_ERROR_KEY;
+            case TIMEOUT -> YOUTUBE_PRECHECK_TIMEOUT_ERROR_KEY;
+            case LAVALINK_UNAVAILABLE -> YOUTUBE_PRECHECK_UNAVAILABLE_ERROR_KEY;
+            case INVALID_YOUTUBE_ID -> YOUTUBE_PRECHECK_INVALID_ERROR_KEY;
+            default -> YOUTUBE_PRECHECK_UNKNOWN_ERROR_KEY;
+        };
     }
 
     private void logLoadFailureDetails(String context, String userInput, String identifier, FriendlyException exception) {
@@ -1302,6 +1357,11 @@ public class MusicPlayerService {
     }
 
     private void queueAutoplayTrack(long guildId, GuildMusicManager guildMusicManager, AudioTrack track) {
+        YouTubePlaybackPrecheckResult precheck = precheckTrack(track, "youtube");
+        if (!precheck.allowsQueue()) {
+            setAutoplayNotice(guildId, "LOAD_FAILED:" + mapYouTubePrecheckFailure(precheck));
+            return;
+        }
         applyTrackMetadata(track, "autoplay", null, "AutoPlay");
         clearAutoplayNotice(guildId);
         guildMusicManager.getScheduler().queue(track);
@@ -1558,6 +1618,9 @@ public class MusicPlayerService {
 
     private ResolvedInput resolveInput(String input) {
         String trimmed = input.trim();
+        if (YouTubePlaybackPrecheckService.isValidVideoId(trimmed)) {
+            return new ResolvedInput("https://www.youtube.com/watch?v=" + trimmed, true, "youtube");
+        }
         if (!looksLikeUrl(trimmed)) {
             return new ResolvedInput(trimmed, false, "youtube");
         }

@@ -9,7 +9,7 @@ NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人�
 - 專案版本：`1.6`
 - Java：`21 LTS`
 - Discord 函式庫：`JDA 6.3.1`
-- 音樂核心：`Lavaplayer 2.2.6`、`youtube-source 1.18.0`、`lavasrc 4.8.1`
+- 音樂核心：`Lavaplayer 2.2.6`、`youtube-source 1.18.1`、`lavasrc 4.8.1`
 - Web 前端：`Vite`
 - 資料儲存：檔案、SQLite、MySQL / HikariCP，依模組設定使用
 - 授權：GPL-3.0
@@ -306,9 +306,49 @@ music:
   commandChannelId: ""
   historyLimit: 50
   statsRetentionDays: 0
+  youtube:
+    oauthEnabled: false
+    oauthRefreshToken: ""
+    cipherEnabled: false
+    cipherServer: "http://localhost:8001"
+    cipherPassword: "test"
+    cipherUserAgent: "norule-music-bot"
+    strictPrecheck:
+      enabled: false
+      cacheTtlHours: 24
+      timeoutMillis: 5000
+      lavalinkBaseUrl: ""
+      lavalinkPassword: ""
 ```
 
 `commandGuildId` 留空會註冊全域 Slash 指令；開發測試時可填單一伺服器 ID，加快指令更新速度。
+
+### YouTube 嚴格播放預檢
+
+`youtube-source` 已更新到 `1.18.1`。如果另外部署 Lavalink 並安裝 `dev.lavalink.youtube:youtube-plugin:1.18.1`，可啟用：
+
+```yml
+music:
+  youtube:
+    strictPrecheck:
+      enabled: true
+      cacheTtlHours: 24
+      timeoutMillis: 5000
+      lavalinkBaseUrl: "http://localhost:2333"
+      lavalinkPassword: "youshallnotpass"
+```
+
+啟用後，單一 YouTube 影片加入佇列前會呼叫 `GET /youtube/stream/{videoId}`，並快取 OK / BLOCKED 結果 24 小時。此功能只能提高入隊前判斷準確率，不能保證 100% 避免播放階段失敗。若使用 Lavalink `application.yml`，請保持內建 YouTube source 關閉：
+
+```yml
+lavalink:
+  server:
+    sources:
+      youtube: false
+  plugins:
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.1"
+      snapshot: false
+```
 
 ## Web UI 設定
 

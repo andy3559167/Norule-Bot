@@ -10,19 +10,22 @@ public final class MusicConfig {
         private final String cipherServer;
         private final String cipherPassword;
         private final String cipherUserAgent;
+        private final StrictPrecheck strictPrecheck;
 
         public Youtube(boolean oauthEnabled,
                        boolean cipherEnabled,
                        String oauthRefreshToken,
                        String cipherServer,
                        String cipherPassword,
-                       String cipherUserAgent) {
+                       String cipherUserAgent,
+                       StrictPrecheck strictPrecheck) {
             this.oauthEnabled = oauthEnabled;
             this.cipherEnabled = cipherEnabled;
             this.oauthRefreshToken = oauthRefreshToken == null ? "" : oauthRefreshToken;
             this.cipherServer = cipherServer == null ? "" : cipherServer;
             this.cipherPassword = cipherPassword == null ? "" : cipherPassword;
             this.cipherUserAgent = cipherUserAgent == null ? "" : cipherUserAgent;
+            this.strictPrecheck = strictPrecheck == null ? StrictPrecheck.fromLegacy(null) : strictPrecheck;
         }
 
         public static Youtube fromLegacy(BotConfig.Music.Youtube legacy) {
@@ -33,7 +36,8 @@ public final class MusicConfig {
                     value.getOauthRefreshToken(),
                     value.getCipherServer(),
                     value.getCipherPassword(),
-                    value.getCipherUserAgent()
+                    value.getCipherUserAgent(),
+                    StrictPrecheck.fromLegacy(value.getStrictPrecheck())
             );
         }
 
@@ -43,6 +47,45 @@ public final class MusicConfig {
         public String getCipherServer() { return cipherServer; }
         public String getCipherPassword() { return cipherPassword; }
         public String getCipherUserAgent() { return cipherUserAgent; }
+        public StrictPrecheck getStrictPrecheck() { return strictPrecheck; }
+
+        public static final class StrictPrecheck {
+            private final boolean enabled;
+            private final int cacheTtlHours;
+            private final int timeoutMillis;
+            private final String lavalinkBaseUrl;
+            private final String lavalinkPassword;
+
+            public StrictPrecheck(boolean enabled,
+                                  int cacheTtlHours,
+                                  int timeoutMillis,
+                                  String lavalinkBaseUrl,
+                                  String lavalinkPassword) {
+                this.enabled = enabled;
+                this.cacheTtlHours = Math.max(1, cacheTtlHours);
+                this.timeoutMillis = Math.max(1, timeoutMillis);
+                this.lavalinkBaseUrl = lavalinkBaseUrl == null ? "" : lavalinkBaseUrl;
+                this.lavalinkPassword = lavalinkPassword == null ? "" : lavalinkPassword;
+            }
+
+            public static StrictPrecheck fromLegacy(BotConfig.Music.Youtube.StrictPrecheck legacy) {
+                BotConfig.Music.Youtube.StrictPrecheck value =
+                        legacy == null ? BotConfig.Music.Youtube.StrictPrecheck.defaultValues() : legacy;
+                return new StrictPrecheck(
+                        value.isEnabled(),
+                        value.getCacheTtlHours(),
+                        value.getTimeoutMillis(),
+                        value.getLavalinkBaseUrl(),
+                        value.getLavalinkPassword()
+                );
+            }
+
+            public boolean isEnabled() { return enabled; }
+            public int getCacheTtlHours() { return cacheTtlHours; }
+            public int getTimeoutMillis() { return timeoutMillis; }
+            public String getLavalinkBaseUrl() { return lavalinkBaseUrl; }
+            public String getLavalinkPassword() { return lavalinkPassword; }
+        }
     }
 
     public static final class Spotify {

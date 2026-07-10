@@ -1324,19 +1324,22 @@ public String getToken() {
             private final String cipherServer;
             private final String cipherPassword;
             private final String cipherUserAgent;
+            private final StrictPrecheck strictPrecheck;
 
             private Youtube(boolean oauthEnabled,
                             boolean cipherEnabled,
                             String oauthRefreshToken,
                             String cipherServer,
                             String cipherPassword,
-                            String cipherUserAgent) {
+                            String cipherUserAgent,
+                            StrictPrecheck strictPrecheck) {
                 this.oauthEnabled = oauthEnabled;
                 this.cipherEnabled = cipherEnabled;
                 this.oauthRefreshToken = nullToEmpty(oauthRefreshToken);
                 this.cipherServer = nullToEmpty(cipherServer);
                 this.cipherPassword = nullToEmpty(cipherPassword);
                 this.cipherUserAgent = nullToEmpty(cipherUserAgent);
+                this.strictPrecheck = strictPrecheck == null ? StrictPrecheck.defaultValues() : strictPrecheck;
             }
 
             public static Youtube fromMap(Map<String, Object> map, Youtube fallback) {
@@ -1347,12 +1350,13 @@ public String getToken() {
                         getString(map, "oauthRefreshToken", defaults.getOauthRefreshToken()),
                         getString(map, "cipherServer", defaults.getCipherServer()),
                         getString(map, "cipherPassword", defaults.getCipherPassword()),
-                        getString(map, "cipherUserAgent", defaults.getCipherUserAgent())
+                        getString(map, "cipherUserAgent", defaults.getCipherUserAgent()),
+                        StrictPrecheck.fromMap(asMap(map.get("strictPrecheck")), defaults.getStrictPrecheck())
                 );
             }
 
             public static Youtube defaultValues() {
-                return new Youtube(false, false, "", "", "", "");
+                return new Youtube(false, false, "", "", "", "", StrictPrecheck.defaultValues());
             }
 
             public boolean isOauthEnabled() {
@@ -1377,6 +1381,67 @@ public String getToken() {
 
             public String getCipherUserAgent() {
                 return cipherUserAgent;
+            }
+
+            public StrictPrecheck getStrictPrecheck() {
+                return strictPrecheck;
+            }
+
+            public static class StrictPrecheck {
+                private final boolean enabled;
+                private final int cacheTtlHours;
+                private final int timeoutMillis;
+                private final String lavalinkBaseUrl;
+                private final String lavalinkPassword;
+
+                private StrictPrecheck(boolean enabled,
+                                       int cacheTtlHours,
+                                       int timeoutMillis,
+                                       String lavalinkBaseUrl,
+                                       String lavalinkPassword) {
+                    this.enabled = enabled;
+                    this.cacheTtlHours = Math.max(1, cacheTtlHours);
+                    this.timeoutMillis = Math.max(1, timeoutMillis);
+                    this.lavalinkBaseUrl = nullToEmpty(lavalinkBaseUrl);
+                    this.lavalinkPassword = nullToEmpty(lavalinkPassword);
+                }
+
+                public static StrictPrecheck fromMap(Map<String, Object> map, StrictPrecheck fallback) {
+                    StrictPrecheck defaults = fallback == null ? defaultValues() : fallback;
+                    String baseUrl = getString(map, "lavalinkBaseUrl", getString(map, "baseUrl", defaults.getLavalinkBaseUrl()));
+                    String password = getString(map, "lavalinkPassword", getString(map, "password", defaults.getLavalinkPassword()));
+                    return new StrictPrecheck(
+                            getBoolean(map, "enabled", defaults.isEnabled()),
+                            getInt(map, "cacheTtlHours", defaults.getCacheTtlHours()),
+                            getInt(map, "timeoutMillis", defaults.getTimeoutMillis()),
+                            baseUrl,
+                            password
+                    );
+                }
+
+                public static StrictPrecheck defaultValues() {
+                    return new StrictPrecheck(false, 24, 5000, "", "");
+                }
+
+                public boolean isEnabled() {
+                    return enabled;
+                }
+
+                public int getCacheTtlHours() {
+                    return cacheTtlHours;
+                }
+
+                public int getTimeoutMillis() {
+                    return timeoutMillis;
+                }
+
+                public String getLavalinkBaseUrl() {
+                    return lavalinkBaseUrl;
+                }
+
+                public String getLavalinkPassword() {
+                    return lavalinkPassword;
+                }
             }
         }
     }
