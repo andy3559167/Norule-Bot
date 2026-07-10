@@ -8,6 +8,7 @@ import net.dv8tion.jda.api.utils.data.DataObject;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
 import java.util.Map;
@@ -57,7 +58,8 @@ public final class ShortUrlWebService {
         owner.sendJson(exchange, 200, DataObject.empty()
                 .put("code", created.code())
                 .put("shortUrl", owner.shortUrlService().toPublicUrl(created.code()))
-                .put("targetUrl", created.target()));
+                .put("targetUrl", created.target())
+                .put("viewCount", created.viewCount()));
     }
 
     public void handleResolveShortUrl(HttpExchange exchange) throws IOException {
@@ -83,6 +85,10 @@ public final class ShortUrlWebService {
         if (resolved == null || resolved.target() == null || resolved.target().isBlank()) {
             sendHtml(exchange, 404, buildShortUrlNotFoundPage());
             return;
+        }
+
+        if ("GET".equalsIgnoreCase(method)) {
+            shortUrlOps.recordView(code, clientAddress(exchange), userAgent(exchange));
         }
 
         owner.redirect(exchange, resolved.target());
@@ -157,5 +163,25 @@ public final class ShortUrlWebService {
         exchange.sendResponseHeaders(statusCode, body.length);
         exchange.getResponseBody().write(body);
         exchange.close();
+    }
+
+    private String clientAddress(HttpExchange exchange) {
+        String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",", 2)[0].trim();
+        }
+        InetSocketAddress remoteAddress = exchange.getRemoteAddress();
+        return remoteAddress == null || remoteAddress.getAddress() == null
+                ? "unknown"
+                : remoteAddress.getAddress().getHostAddress();
+    }
+
+    private String userAgent(HttpExchange exchange) {
+        String value = exchange.getRequestHeaders().getFirst("User-Agent");
+        if (value == null || value.isBlank()) {
+            return "unknown";
+        }
+        String normalized = value.trim();
+        return normalized.length() <= 240 ? normalized : normalized.substring(0, 240);
     }
 }

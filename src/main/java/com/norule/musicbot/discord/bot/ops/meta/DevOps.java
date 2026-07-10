@@ -3,6 +3,7 @@ package com.norule.musicbot.discord.bot.ops.meta;
 import com.norule.musicbot.config.domain.RuntimeConfigSnapshot;
 import com.norule.musicbot.discord.bot.service.meta.DevService;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.EntitySelectInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 
 public final class DevOps {
@@ -27,5 +28,9 @@ public final class DevOps {
 
     public boolean handleButton(ButtonInteractionEvent event) {
         return devService.handleButton(event);
+    }
+
+    public boolean handleEntitySelect(EntitySelectInteractionEvent event) {
+        return devService.handleEntitySelect(event);
     }
 }

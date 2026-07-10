@@ -17,21 +17,37 @@ public final class SqliteShortUrlRepository implements ShortUrlRepository {
                 code TEXT PRIMARY KEY,
                 target TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL
+                expires_at INTEGER NOT NULL,
+                view_count INTEGER NOT NULL DEFAULT 0
             )
             """;
+    private static final String CREATE_SETTINGS_TABLE = """
+            CREATE TABLE IF NOT EXISTS short_url_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL
+            )
+            """;
+    private static final String LOG_CHANNEL_SETTING = "discord_log_channel_id";
     private static final String CREATE_INDEX = "CREATE INDEX IF NOT EXISTS idx_short_urls_target_expires ON short_urls(target, expires_at)";
-    private static final String SELECT_BY_CODE = "SELECT code, target, created_at, expires_at FROM short_urls WHERE code = ?";
+    private static final String SELECT_BY_CODE = "SELECT code, target, created_at, expires_at, view_count FROM short_urls WHERE code = ?";
     private static final String SELECT_ACTIVE_BY_TARGET = """
-            SELECT code, target, created_at, expires_at
+            SELECT code, target, created_at, expires_at, view_count
             FROM short_urls
             WHERE target = ? AND expires_at > ?
             ORDER BY created_at DESC
             LIMIT 1
             """;
-    private static final String INSERT = "INSERT INTO short_urls (code, target, created_at, expires_at) VALUES (?, ?, ?, ?)";
+    private static final String INSERT = "INSERT INTO short_urls (code, target, created_at, expires_at, view_count) VALUES (?, ?, ?, ?, ?)";
     private static final String DELETE_BY_CODE = "DELETE FROM short_urls WHERE code = ?";
     private static final String CLEANUP = "DELETE FROM short_urls WHERE expires_at <= ?";
+    private static final String INCREMENT_VIEW_COUNT = "UPDATE short_urls SET view_count = view_count + 1 WHERE code = ?";
+    private static final String SELECT_VIEW_COUNT = "SELECT view_count FROM short_urls WHERE code = ?";
+    private static final String SELECT_SETTING = "SELECT setting_value FROM short_url_settings WHERE setting_key = ?";
+    private static final String UPSERT_SETTING = """
+            INSERT INTO short_url_settings (setting_key, setting_value) VALUES (?, ?)
+            ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value
+            """;
+    private static final String DELETE_SETTING = "DELETE FROM short_url_settings WHERE setting_key = ?";
 
     private final String jdbcUrl;
 
@@ -94,6 +110,7 @@ public final class SqliteShortUrlRepository implements ShortUrlRepository {
             statement.setString(2, entry.getTarget());
             statement.setLong(3, entry.getCreatedAt());
             statement.setLong(4, entry.getExpiresAt());
+            statement.setLong(5, entry.getViewCount());
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to save short url", e);
@@ -122,11 +139,67 @@ public final class SqliteShortUrlRepository implements ShortUrlRepository {
         }
     }
 
+    @Override
+    public long incrementViewCount(String code) {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl)) {
+            try (PreparedStatement update = connection.prepareStatement(INCREMENT_VIEW_COUNT)) {
+                update.setString(1, code);
+                if (update.executeUpdate() == 0) {
+                    return 0L;
+                }
+            }
+            try (PreparedStatement select = connection.prepareStatement(SELECT_VIEW_COUNT)) {
+                select.setString(1, code);
+                try (ResultSet resultSet = select.executeQuery()) {
+                    return resultSet.next() ? resultSet.getLong("view_count") : 0L;
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to increment short url view count", e);
+        }
+    }
+
+    @Override
+    public Long findLogChannelId() {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+             PreparedStatement statement = connection.prepareStatement(SELECT_SETTING)) {
+            statement.setString(1, LOG_CHANNEL_SETTING);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                if (!resultSet.next()) {
+                    return null;
+                }
+                long channelId = Long.parseLong(resultSet.getString("setting_value"));
+                return channelId > 0L ? channelId : null;
+            }
+        } catch (NumberFormatException ignored) {
+            return null;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to query short url log channel", e);
+        }
+    }
+
+    @Override
+    public void saveLogChannelId(Long channelId) {
+        boolean remove = channelId == null || channelId <= 0L;
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+             PreparedStatement statement = connection.prepareStatement(remove ? DELETE_SETTING : UPSERT_SETTING)) {
+            statement.setString(1, LOG_CHANNEL_SETTING);
+            if (!remove) {
+                statement.setString(2, String.valueOf(channelId));
+            }
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to save short url log channel", e);
+        }
+    }
+
     private void initializeSchema() {
         try (Connection connection = DriverManager.getConnection(jdbcUrl);
-             Statement statement = connection.createStatement()) {
+            Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            ensureViewCountColumn(connection, statement);
             statement.execute(CREATE_INDEX);
+            statement.execute(CREATE_SETTINGS_TABLE);
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to initialize short url sqlite schema", e);
         }
@@ -137,7 +210,20 @@ public final class SqliteShortUrlRepository implements ShortUrlRepository {
                 rs.getString("code"),
                 rs.getString("target"),
                 rs.getLong("created_at"),
-                rs.getLong("expires_at")
+                rs.getLong("expires_at"),
+                rs.getLong("view_count")
         );
+    }
+
+    private void ensureViewCountColumn(Connection connection, Statement statement) throws SQLException {
+        try (Statement tableInfo = connection.createStatement();
+             ResultSet columns = tableInfo.executeQuery("PRAGMA table_info(short_urls)")) {
+            while (columns.next()) {
+                if ("view_count".equalsIgnoreCase(columns.getString("name"))) {
+                    return;
+                }
+            }
+        }
+        statement.execute("ALTER TABLE short_urls ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0");
     }
 }

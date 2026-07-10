@@ -19,6 +19,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ImageShareServiceTest {
@@ -38,11 +39,13 @@ class ImageShareServiceTest {
 
         assertTrue(result.isSuccess());
         assertNotNull(result.imageShare());
-        assertTrue(result.imageShare().code().startsWith("image-"));
+        assertEquals(7, result.imageShare().code().length());
+        assertFalse(result.imageShare().code().startsWith("image-"));
         assertTrue(result.imageShare().isPasswordProtected());
         assertTrue(service.verifyPassword(result.imageShare(), "0711"));
         assertFalse(service.verifyPassword(result.imageShare(), "1234"));
         assertEquals(clock.millis() + 60L * 60L * 1000L, result.imageShare().expiresAt());
+        assertEquals(1L, service.recordView(result.imageShare()).viewCount());
     }
 
     @Test
@@ -61,6 +64,62 @@ class ImageShareServiceTest {
 
         assertEquals(ImageShareService.UploadError.IMAGE_TOO_LARGE, oversized.error());
         assertEquals(ImageShareService.UploadError.RETENTION_TOO_LONG, tooLong.error());
+    }
+
+    @Test
+    void reusesTheActiveLinkWhenImageAccessAndRetentionMatch() {
+        ImageShareService service = createService(Clock.fixed(Instant.parse("2026-07-11T12:00:00Z"), ZoneOffset.UTC), new ImageShareService.Options(
+                true, 60L * 60L * 1000L, 24L * 60L * 60L * 1000L, 20L * 1024L * 1024L,
+                60_000L, 7
+        ));
+
+        ImageShareService.UploadResult first = service.create(new ImageShareService.Upload(PNG, false, "", 0L));
+        ImageShareService.UploadResult second = service.create(new ImageShareService.Upload(PNG.clone(), false, "", 0L));
+
+        assertTrue(first.isSuccess());
+        assertTrue(second.isSuccess());
+        assertEquals(first.imageShare().code(), second.imageShare().code());
+        assertFalse(second.imageShare().isPasswordProtected());
+        assertNotEquals("", first.imageShare().contentHash());
+    }
+
+    @Test
+    void createsDifferentLinksWhenPasswordOrRetentionDiffers() {
+        ImageShareService service = createService(Clock.fixed(Instant.parse("2026-07-11T12:00:00Z"), ZoneOffset.UTC), new ImageShareService.Options(
+                true, 60L * 60L * 1000L, 24L * 60L * 60L * 1000L, 20L * 1024L * 1024L,
+                60_000L, 7
+        ));
+
+        ImageShareService.UploadResult unprotected = service.create(new ImageShareService.Upload(PNG, false, "", 60L * 60L * 1000L));
+        ImageShareService.UploadResult password1234 = service.create(new ImageShareService.Upload(PNG, true, "1234", 60L * 60L * 1000L));
+        ImageShareService.UploadResult password5678 = service.create(new ImageShareService.Upload(PNG, true, "5678", 60L * 60L * 1000L));
+        ImageShareService.UploadResult threeHours = service.create(new ImageShareService.Upload(PNG, false, "", 3L * 60L * 60L * 1000L));
+
+        assertTrue(unprotected.isSuccess());
+        assertTrue(password1234.isSuccess());
+        assertTrue(password5678.isSuccess());
+        assertTrue(threeHours.isSuccess());
+        assertNotEquals(unprotected.imageShare().code(), password1234.imageShare().code());
+        assertNotEquals(password1234.imageShare().code(), password5678.imageShare().code());
+        assertNotEquals(unprotected.imageShare().code(), threeHours.imageShare().code());
+    }
+
+    @Test
+    void reusesOnlyTheSameCustomExpiration() {
+        Clock clock = Clock.fixed(Instant.parse("2026-07-11T12:00:00Z"), ZoneOffset.UTC);
+        ImageShareService service = createService(clock, new ImageShareService.Options(
+                true, 60L * 60L * 1000L, 365L * 24L * 60L * 60L * 1000L, 20L * 1024L * 1024L,
+                60_000L, 7
+        ));
+        long firstExpiration = clock.millis() + 30L * 60L * 1000L;
+        long secondExpiration = clock.millis() + 60L * 60L * 1000L;
+
+        ImageShareService.UploadResult first = service.create(new ImageShareService.Upload(PNG, false, "", 0L, firstExpiration));
+        ImageShareService.UploadResult duplicate = service.create(new ImageShareService.Upload(PNG.clone(), false, "", 0L, firstExpiration));
+        ImageShareService.UploadResult differentExpiration = service.create(new ImageShareService.Upload(PNG, false, "", 0L, secondExpiration));
+
+        assertEquals(first.imageShare().code(), duplicate.imageShare().code());
+        assertNotEquals(first.imageShare().code(), differentExpiration.imageShare().code());
     }
 
     private ImageShareService createService(Clock clock, ImageShareService.Options options) {
@@ -82,6 +141,13 @@ class ImageShareServiceTest {
         }
 
         @Override
+        public List<ImageShare> findActiveByContentHash(String contentHash, long nowMillis) {
+            return images.values().stream()
+                    .filter(image -> contentHash.equals(image.contentHash()) && image.expiresAt() > nowMillis)
+                    .toList();
+        }
+
+        @Override
         public void save(ImageShare imageShare) {
             images.put(imageShare.code(), imageShare);
         }
@@ -94,6 +160,17 @@ class ImageShareServiceTest {
         @Override
         public List<ImageShare> findExpired(long nowMillis) {
             return images.values().stream().filter(image -> image.expiresAt() <= nowMillis).toList();
+        }
+
+        @Override
+        public long incrementViewCount(String code) {
+            ImageShare imageShare = images.get(code);
+            if (imageShare == null) {
+                return 0L;
+            }
+            long updated = imageShare.viewCount() + 1L;
+            images.put(code, imageShare.withViewCount(updated));
+            return updated;
         }
     }
 
@@ -121,6 +198,21 @@ class ImageShareServiceTest {
         @Override
         public int cleanupExpired(long nowMillis) {
             return 0;
+        }
+
+        @Override
+        public long incrementViewCount(String code) {
+            return 0L;
+        }
+
+        @Override
+        public Long findLogChannelId() {
+            return null;
+        }
+
+        @Override
+        public void saveLogChannelId(Long channelId) {
+            // Not needed by image-share tests.
         }
     }
 

@@ -14,6 +14,7 @@ import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -48,7 +49,16 @@ public final class ImageShareService {
         }
     }
 
-    public record Upload(byte[] content, boolean passwordProtected, String password, long requestedRetentionMillis) {
+    public record Upload(
+            byte[] content,
+            boolean passwordProtected,
+            String password,
+            long requestedRetentionMillis,
+            long requestedExpiresAtMillis
+    ) {
+        public Upload(byte[] content, boolean passwordProtected, String password, long requestedRetentionMillis) {
+            this(content, passwordProtected, password, requestedRetentionMillis, 0L);
+        }
     }
 
     public record UploadResult(ImageShare imageShare, UploadError error) {
@@ -57,7 +67,6 @@ public final class ImageShareService {
         }
     }
 
-    private static final String IMAGE_CODE_PREFIX = "image-";
     private static final char[] RANDOM_CODE_ALPHABET = "23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ".toCharArray();
     private static final int PASSWORD_ITERATIONS = 120_000;
     private static final int PASSWORD_KEY_LENGTH_BITS = 256;
@@ -96,7 +105,7 @@ public final class ImageShareService {
                 : options);
     }
 
-    public UploadResult create(Upload upload) {
+    public synchronized UploadResult create(Upload upload) {
         Options currentOptions = options.get();
         if (!currentOptions.enabled()) {
             return new UploadResult(null, UploadError.DISABLED);
@@ -112,27 +121,45 @@ public final class ImageShareService {
             return new UploadResult(null, UploadError.UNSUPPORTED_IMAGE);
         }
 
-        long retention = upload.requestedRetentionMillis() <= 0L
-                ? currentOptions.defaultRetentionMillis()
-                : upload.requestedRetentionMillis();
-        if (retention > currentOptions.maxRetentionMillis()) {
+        long now = clock.millis();
+        boolean customExpiration = upload.requestedExpiresAtMillis() > 0L;
+        long retention;
+        if (customExpiration) {
+            retention = upload.requestedExpiresAtMillis() - now;
+        } else if (upload.requestedRetentionMillis() <= 0L) {
+            retention = currentOptions.defaultRetentionMillis();
+        } else {
+            retention = upload.requestedRetentionMillis();
+        }
+        if (retention <= 0L || retention > currentOptions.maxRetentionMillis()) {
             return new UploadResult(null, UploadError.RETENTION_TOO_LONG);
         }
+        long expiresAt = customExpiration ? upload.requestedExpiresAtMillis() : now + retention;
 
-        String passwordHash = "";
+        String effectivePassword = "";
         if (upload.passwordProtected()) {
-            String password = domainService.normalizePassword(upload.password());
-            if (password.isBlank()) {
-                password = domainService.defaultPassword(LocalDate.now(clock));
+            effectivePassword = domainService.normalizePassword(upload.password());
+            if (effectivePassword.isBlank()) {
+                effectivePassword = domainService.defaultPassword(LocalDate.now(clock));
             }
-            if (!domainService.isValidPassword(password)) {
+            if (!domainService.isValidPassword(effectivePassword)) {
                 return new UploadResult(null, UploadError.INVALID_PASSWORD);
             }
-            passwordHash = hashPassword(password);
         }
 
-        long now = clock.millis();
         maybeCleanup(now);
+        String contentHash = contentHash(upload.content());
+        for (ImageShare existing : imageRepository.findActiveByContentHash(contentHash, now)) {
+            if (!hasSameAccessAndExpiration(existing, upload.passwordProtected(), effectivePassword,
+                    customExpiration, retention, expiresAt)) {
+                continue;
+            }
+            if (storage.exists(existing)) {
+                return new UploadResult(existing, null);
+            }
+            delete(existing);
+        }
+        String passwordHash = upload.passwordProtected() ? hashPassword(effectivePassword) : "";
         String code = nextAvailableCode(currentOptions.codeLength());
         if (code == null) {
             return new UploadResult(null, UploadError.CREATE_FAILED);
@@ -143,8 +170,9 @@ public final class ImageShareService {
                 imageType.contentType(),
                 upload.content().length,
                 now,
-                now + retention,
-                passwordHash
+                expiresAt,
+                passwordHash,
+                contentHash
         );
         try {
             storage.save(imageShare, upload.content());
@@ -161,7 +189,7 @@ public final class ImageShareService {
     }
 
     public ImageShare resolve(String code) {
-        if (code == null || code.isBlank() || !code.startsWith(IMAGE_CODE_PREFIX)) {
+        if (code == null || code.isBlank()) {
             return null;
         }
         long now = clock.millis();
@@ -197,8 +225,20 @@ public final class ImageShareService {
         return !normalized.isBlank() && verifyPasswordHash(normalized, imageShare.passwordHash());
     }
 
+    public ImageShare recordView(ImageShare imageShare) {
+        if (imageShare == null) {
+            return null;
+        }
+        long viewCount = imageRepository.incrementViewCount(imageShare.code());
+        return imageShare.withViewCount(viewCount);
+    }
+
     public Options options() {
         return options.get();
+    }
+
+    public boolean isCodeInUse(String code) {
+        return resolve(code) != null;
     }
 
     public void updateOptions(Options updatedOptions) {
@@ -229,7 +269,7 @@ public final class ImageShareService {
 
     private String nextAvailableCode(int codeLength) {
         for (int attempt = 0; attempt < 10_000; attempt++) {
-            String code = IMAGE_CODE_PREFIX + randomCode(codeLength);
+            String code = randomCode(codeLength);
             if (imageRepository.findByCode(code) == null && shortUrlRepository.findByCode(code) == null) {
                 return code;
             }
@@ -243,6 +283,32 @@ public final class ImageShareService {
             chars[i] = RANDOM_CODE_ALPHABET[SECURE_RANDOM.nextInt(RANDOM_CODE_ALPHABET.length)];
         }
         return new String(chars);
+    }
+
+    private String contentHash(byte[] content) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content));
+        } catch (Exception e) {
+            throw new IllegalStateException("Unable to hash image-share content", e);
+        }
+    }
+
+    private boolean hasSameAccessAndExpiration(ImageShare existing,
+                                               boolean passwordProtected,
+                                               String password,
+                                               boolean customExpiration,
+                                               long retention,
+                                               long expiresAt) {
+        if (existing.isPasswordProtected() != passwordProtected) {
+            return false;
+        }
+        if (passwordProtected && !verifyPasswordHash(password, existing.passwordHash())) {
+            return false;
+        }
+        if (customExpiration) {
+            return existing.expiresAt() == expiresAt;
+        }
+        return existing.expiresAt() - existing.createdAt() == retention;
     }
 
     private void delete(ImageShare imageShare) {

@@ -45,4 +45,6 @@ public final class ComponentIds {
     public static final String PANEL_REFRESH = "panel:refresh";
     public static final String PANEL_SHUFFLE = "panel:shuffle";
     public static final String REPORT_MODAL_PREFIX = "report:modal:";
+    public static final String DEV_SHORT_URL_LOG_CHANNEL_PREFIX = "dev:setting:short-url-log:";
+    public static final String DEV_SHORT_URL_LOG_DISABLE_PREFIX = "dev:setting:short-url-log:disable:";
 }

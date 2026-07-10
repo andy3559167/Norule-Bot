@@ -1,14 +1,21 @@
 package com.norule.musicbot.discord.bot.service.meta;
 
+import com.norule.musicbot.ShortUrlService;
 import com.norule.musicbot.config.domain.RuntimeConfigSnapshot;
+import com.norule.musicbot.discord.bot.gateway.component.ComponentIds;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.User;
+import net.dv8tion.jda.api.entities.channel.ChannelType;
+import net.dv8tion.jda.api.entities.channel.concrete.TextChannel;
 import net.dv8tion.jda.api.events.interaction.component.ButtonInteractionEvent;
+import net.dv8tion.jda.api.events.interaction.component.EntitySelectInteractionEvent;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.components.actionrow.ActionRow;
 import net.dv8tion.jda.api.components.buttons.Button;
+import net.dv8tion.jda.api.components.selections.EntitySelectMenu;
 
 import java.awt.Color;
 import java.io.IOException;
@@ -34,12 +41,20 @@ public final class DevService {
     private static final Pattern PROC_STATUS_KB_PATTERN = Pattern.compile("^(\\d+)\\s*kB$");
 
     private final IntSupplier activePlaybackGuildCountSupplier;
+    private final ShortUrlService shortUrlService;
     private volatile RuntimeConfigSnapshot runtimeConfig;
     private final Instant startedAt = Instant.now();
 
     public DevService(RuntimeConfigSnapshot runtimeConfig, IntSupplier activePlaybackGuildCountSupplier) {
+        this(runtimeConfig, activePlaybackGuildCountSupplier, null);
+    }
+
+    public DevService(RuntimeConfigSnapshot runtimeConfig,
+                      IntSupplier activePlaybackGuildCountSupplier,
+                      ShortUrlService shortUrlService) {
         this.runtimeConfig = runtimeConfig;
         this.activePlaybackGuildCountSupplier = activePlaybackGuildCountSupplier == null ? () -> 0 : activePlaybackGuildCountSupplier;
+        this.shortUrlService = shortUrlService;
     }
 
     public void reloadRuntimeConfig(RuntimeConfigSnapshot newConfig) {
@@ -54,10 +69,6 @@ public final class DevService {
     }
 
     public void handleMessage(MessageReceivedEvent event, String raw) {
-        if (event.isFromGuild()) {
-            logDeveloperCommand(event, "ignored", "guild-channel");
-            return;
-        }
         if (!isConfiguredDeveloper(event.getAuthor().getIdLong())) {
             logDeveloperCommand(event, "denied", "not-configured-developer");
             return;
@@ -68,6 +79,15 @@ public final class DevService {
                 : raw.substring(DEV_COMMAND_PREFIX.length()).trim();
         String[] split = args.split("\\s+", 2);
         String subcommand = args.isBlank() ? "help" : split[0].toLowerCase(Locale.ROOT);
+        if ("setting".equals(subcommand)) {
+            logDeveloperCommand(event, subcommand, event.isFromGuild() ? "guild" : "dm");
+            sendDeveloperSettingsMessage(event);
+            return;
+        }
+        if (event.isFromGuild()) {
+            logDeveloperCommand(event, subcommand, "ignored-guild-channel");
+            return;
+        }
         logDeveloperCommand(event, subcommand, "dm");
 
         switch (subcommand) {
@@ -89,7 +109,19 @@ public final class DevService {
             handleDeveloperInfoRefreshButton(event);
             return true;
         }
+        if (id.startsWith(ComponentIds.DEV_SHORT_URL_LOG_DISABLE_PREFIX)) {
+            handleShortUrlLogDisable(event);
+            return true;
+        }
         return false;
+    }
+
+    public boolean handleEntitySelect(EntitySelectInteractionEvent event) {
+        if (!event.getComponentId().startsWith(ComponentIds.DEV_SHORT_URL_LOG_CHANNEL_PREFIX)) {
+            return false;
+        }
+        handleShortUrlLogChannelSelect(event);
+        return true;
     }
 
     private boolean isConfiguredDeveloper(long userId) {
@@ -126,7 +158,8 @@ public final class DevService {
                 .addField("`&dev help`", "Show this command list.", false)
                 .addField("`&dev ping`", "Check bot responsiveness.", false)
                 .addField("`&dev info`", "Show runtime status.", false)
-                .addField("`&dev guilds`", "Show joined guilds with pagination.", false);
+                .addField("`&dev guilds`", "Show joined guilds with pagination.", false)
+                .addField("`&dev setting`", "Configure the short URL log channel in a server.", false);
     }
 
     private EmbedBuilder developerPingEmbed(JDA jda) {
@@ -269,6 +302,93 @@ public final class DevService {
                         },
                         error -> logDeveloperReplyError(event.getAuthor(), error)
                 );
+    }
+
+    private void sendDeveloperSettingsMessage(MessageReceivedEvent event) {
+        if (!event.isFromGuild()) {
+            sendDeveloperPrivateEmbed(event, developerErrorEmbed("Use `&dev setting` in the server that contains the log channel."));
+            return;
+        }
+        if (shortUrlService == null) {
+            sendDeveloperPrivateEmbed(event, developerErrorEmbed("Short URL service is unavailable."));
+            return;
+        }
+        long requesterId = event.getAuthor().getIdLong();
+        event.getChannel().sendMessageEmbeds(shortUrlSettingsEmbed(event.getJDA()).build())
+                .setComponents(
+                        ActionRow.of(shortUrlLogChannelMenu(requesterId)),
+                        ActionRow.of(Button.danger(ComponentIds.DEV_SHORT_URL_LOG_DISABLE_PREFIX + requesterId, "停用短網址日誌"))
+                )
+                .queue(
+                        ignored -> {
+                        },
+                        error -> logDeveloperReplyError(event.getAuthor(), error)
+                );
+    }
+
+    private EmbedBuilder shortUrlSettingsEmbed(JDA jda) {
+        Long channelId = shortUrlService == null ? null : shortUrlService.getLogChannelId();
+        TextChannel channel = channelId == null ? null : jda.getTextChannelById(channelId);
+        String current = channel == null ? "未設定" : channel.getAsMention() + " (`" + channel.getId() + "`)";
+        return developerBaseEmbed("Short URL Settings")
+                .setDescription("設定短網址建立與瀏覽日誌的 Discord 通知頻道。")
+                .addField("目前頻道", current, false)
+                .addField("權限", "僅 `developers.ids` 內的開發人員可以變更。", false);
+    }
+
+    private EntitySelectMenu shortUrlLogChannelMenu(long requesterId) {
+        return EntitySelectMenu.create(ComponentIds.DEV_SHORT_URL_LOG_CHANNEL_PREFIX + requesterId, EntitySelectMenu.SelectTarget.CHANNEL)
+                .setChannelTypes(ChannelType.TEXT)
+                .setPlaceholder("選擇短網址日誌頻道")
+                .setRequiredRange(1, 1)
+                .build();
+    }
+
+    private void handleShortUrlLogChannelSelect(EntitySelectInteractionEvent event) {
+        Long requesterId = parseLongOrNull(event.getComponentId().substring(ComponentIds.DEV_SHORT_URL_LOG_CHANNEL_PREFIX.length()));
+        if (requesterId == null || !canUseDeveloperControl(requesterId, event.getUser())) {
+            event.reply("Only the requesting developer can use this setting.").setEphemeral(true).queue();
+            return;
+        }
+        if (event.getGuild() == null || shortUrlService == null) {
+            event.reply("This setting must be used in a server.").setEphemeral(true).queue();
+            return;
+        }
+        List<TextChannel> channels = event.getMentions().getChannels(TextChannel.class);
+        if (channels.isEmpty()) {
+            event.reply("Please select a text channel.").setEphemeral(true).queue();
+            return;
+        }
+        TextChannel channel = channels.get(0);
+        if (!channel.canTalk() || !event.getGuild().getSelfMember().hasPermission(channel, Permission.MESSAGE_EMBED_LINKS)) {
+            event.reply("The bot needs View Channel, Send Messages, and Embed Links in that channel.")
+                    .setEphemeral(true)
+                    .queue();
+            return;
+        }
+        shortUrlService.updateLogChannelId(channel.getIdLong());
+        event.editMessageEmbeds(shortUrlSettingsEmbed(event.getJDA()).build())
+                .setComponents(
+                        ActionRow.of(shortUrlLogChannelMenu(requesterId)),
+                        ActionRow.of(Button.danger(ComponentIds.DEV_SHORT_URL_LOG_DISABLE_PREFIX + requesterId, "停用短網址日誌"))
+                )
+                .queue();
+    }
+
+    private void handleShortUrlLogDisable(ButtonInteractionEvent event) {
+        Long requesterId = parseLongOrNull(event.getComponentId().substring(ComponentIds.DEV_SHORT_URL_LOG_DISABLE_PREFIX.length()));
+        if (requesterId == null || !canUseDeveloperControl(requesterId, event.getUser())) {
+            event.reply("Only the requesting developer can use this setting.").setEphemeral(true).queue();
+            return;
+        }
+        if (shortUrlService == null) {
+            event.reply("Short URL service is unavailable.").setEphemeral(true).queue();
+            return;
+        }
+        shortUrlService.updateLogChannelId(null);
+        event.editMessageEmbeds(shortUrlSettingsEmbed(event.getJDA()).build())
+                .setComponents(ActionRow.of(shortUrlLogChannelMenu(requesterId)))
+                .queue();
     }
 
     private String developerBotVersion() {

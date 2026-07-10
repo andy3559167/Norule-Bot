@@ -86,7 +86,11 @@ public class MusicCommandListener extends ListenerAdapter {
                 wordChainOps
         );
         this.gateway = new InteractionGateway(service, signals);
-        this.devOps = new DevOps(new DevService(runtimeConfig, musicService::getActivePlaybackGuildCount));
+        this.devOps = new DevOps(new DevService(
+                runtimeConfig,
+                musicService::getActivePlaybackGuildCount,
+                shortUrlService
+        ));
     }
 
     public void reloadRuntimeConfig(RuntimeConfigSnapshot newConfig) {
@@ -146,7 +150,9 @@ public class MusicCommandListener extends ListenerAdapter {
 
     @Override
     public void onEntitySelectInteraction(EntitySelectInteractionEvent event) {
+        if (devOps.handleEntitySelect(event)) {
+            return;
+        }
         gateway.onEntitySelect(event);
     }
 }
-

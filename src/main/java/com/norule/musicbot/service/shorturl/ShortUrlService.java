@@ -31,6 +31,11 @@ public final class ShortUrlService {
         return map(entry);
     }
 
+    public ShortUrl recordView(String code, String clientAddress, String userAgent) {
+        com.norule.musicbot.ShortUrlService.ShortUrlEntry entry = coreService.resolve(code);
+        return map(coreService.recordView(entry, clientAddress, userAgent));
+    }
+
     private ShortUrl map(com.norule.musicbot.ShortUrlService.ShortUrlEntry entry) {
         if (entry == null) {
             return null;
@@ -39,7 +44,8 @@ public final class ShortUrlService {
                 entry.getCode(),
                 entry.getTarget(),
                 entry.getCreatedAt(),
-                entry.getExpiresAt()
+                entry.getExpiresAt(),
+                entry.getViewCount()
         );
     }
 }

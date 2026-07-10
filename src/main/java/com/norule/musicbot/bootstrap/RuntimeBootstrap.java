@@ -11,6 +11,7 @@ import com.norule.musicbot.config.loader.ConfigLoader;
 import com.norule.musicbot.domain.music.*;
 import com.norule.musicbot.i18n.*;
 import com.norule.musicbot.discord.bot.gateway.WordChainMessageListener;
+import com.norule.musicbot.discord.bot.gateway.command.shorturl.DiscordShortUrlAccessPublisher;
 import com.norule.musicbot.discord.bot.gateway.listener.*;
 import com.norule.musicbot.discord.bot.gateway.wordchain.DictionaryApiHttpGateway;
 import com.norule.musicbot.discord.bot.ops.wordchain.WordChainOps;
@@ -261,6 +262,7 @@ public final class RuntimeBootstrap {
         }
 
         JDA jda = builder.build();
+        shortUrlService.updateAccessPublisher(new DiscordShortUrlAccessPublisher(jda));
         installConsoleShutdownListener(new ConsoleRuntimeContext(
                 jda,
                 i18nService,

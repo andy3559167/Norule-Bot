@@ -1,9 +1,12 @@
 package com.norule.musicbot;
 
+import com.norule.musicbot.domain.shorturl.ShortUrlAccessEvent;
 import com.norule.musicbot.shorturl.ShortUrlRepository;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -109,8 +112,31 @@ class ShortUrlServiceTest {
         assertNull(service.resolve("ttl-code"));
     }
 
+    @Test
+    void recordsViewsAndPersistsDiscordLogChannel() {
+        InMemoryRepository repository = new InMemoryRepository();
+        ShortUrlService service = new ShortUrlService(repository);
+        ShortUrlService.ShortUrlEntry created = service.create("https://example.com/view", "view-code");
+        List<ShortUrlAccessEvent> events = new ArrayList<>();
+        service.updateLogChannelId(123456789L);
+        service.updateAccessPublisher((channelId, event) -> {
+            assertEquals(123456789L, channelId);
+            events.add(event);
+        });
+
+        ShortUrlService.ShortUrlEntry viewed = service.recordView(created, "127.0.0.1", "JUnit");
+
+        assertEquals(1L, viewed.getViewCount());
+        assertEquals(123456789L, service.getLogChannelId());
+        assertEquals(123456789L, repository.findLogChannelId());
+        assertEquals(1, events.size());
+        assertEquals(ShortUrlAccessEvent.Action.VIEWED, events.get(0).action());
+        assertEquals(1L, events.get(0).viewCount());
+    }
+
     private static final class InMemoryRepository implements ShortUrlRepository {
         private final Map<String, ShortUrlService.ShortUrlEntry> store = new LinkedHashMap<>();
+        private Long logChannelId;
 
         @Override
         public ShortUrlService.ShortUrlEntry findByCode(String code) {
@@ -149,6 +175,27 @@ class ShortUrlServiceTest {
             int before = store.size();
             store.entrySet().removeIf(e -> e.getValue().getExpiresAt() <= nowMillis);
             return before - store.size();
+        }
+
+        @Override
+        public long incrementViewCount(String code) {
+            ShortUrlService.ShortUrlEntry entry = store.get(code);
+            if (entry == null) {
+                return 0L;
+            }
+            long updated = entry.getViewCount() + 1L;
+            store.put(code, entry.withViewCount(updated));
+            return updated;
+        }
+
+        @Override
+        public Long findLogChannelId() {
+            return logChannelId;
+        }
+
+        @Override
+        public void saveLogChannelId(Long channelId) {
+            logChannelId = channelId;
         }
     }
 }

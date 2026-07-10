@@ -2,7 +2,9 @@ package com.norule.musicbot;
 
 import com.norule.musicbot.domain.shorturl.ShortUrlDomainService;
 import com.norule.musicbot.domain.shorturl.ImageShare;
+import com.norule.musicbot.domain.shorturl.ShortUrlAccessEvent;
 import com.norule.musicbot.service.shorturl.ImageShareService;
+import com.norule.musicbot.shorturl.ShortUrlAccessPublisher;
 import com.norule.musicbot.shorturl.ShortUrlRepository;
 
 import java.net.URI;
@@ -27,11 +29,20 @@ public final class ShortUrlService {
         }
     }
 
-    public record ShortUrlEntry(String code, String target, long createdAt, long expiresAt) {
+    public record ShortUrlEntry(String code, String target, long createdAt, long expiresAt, long viewCount) {
+        public ShortUrlEntry(String code, String target, long createdAt, long expiresAt) {
+            this(code, target, createdAt, expiresAt, 0L);
+        }
+
         public String getCode() { return code; }
         public String getTarget() { return target; }
         public long getCreatedAt() { return createdAt; }
         public long getExpiresAt() { return expiresAt; }
+        public long getViewCount() { return viewCount; }
+
+        public ShortUrlEntry withViewCount(long updatedViewCount) {
+            return new ShortUrlEntry(code, target, createdAt, expiresAt, Math.max(0L, updatedViewCount));
+        }
     }
 
     private static final long DEFAULT_TTL_MILLIS = 7L * 24L * 60L * 60L * 1000L;
@@ -45,6 +56,9 @@ public final class ShortUrlService {
     private final ShortUrlRepository repository;
     private final ImageShareService imageShareService;
     private final AtomicReference<Options> options = new AtomicReference<>();
+    private final AtomicReference<ShortUrlAccessPublisher> accessPublisher =
+            new AtomicReference<>(ShortUrlAccessPublisher.NO_OP);
+    private volatile Long logChannelId;
     private volatile long lastCleanupAt = 0L;
 
     public ShortUrlService(ShortUrlRepository repository) {
@@ -68,6 +82,7 @@ public final class ShortUrlService {
         }
         this.repository = repository;
         this.imageShareService = imageShareService;
+        this.logChannelId = normalizeChannelId(repository.findLogChannelId());
         this.options.set(options == null
                 ? new Options(
                 true,
@@ -121,8 +136,10 @@ public final class ShortUrlService {
         if (code == null) {
             return null;
         }
-        ShortUrlEntry created = new ShortUrlEntry(code, target, now, now + safeTtl);
+        ShortUrlEntry created = new ShortUrlEntry(code, target, now, now + safeTtl, 0L);
         repository.save(created);
+        publishAccess(ShortUrlAccessEvent.Action.CREATED, ShortUrlAccessEvent.ResourceType.URL,
+                created.code(), created.target(), created.viewCount(), created.expiresAt(), false, "", "");
         return created;
     }
 
@@ -188,7 +205,14 @@ public final class ShortUrlService {
         if (imageShareService == null) {
             return new ImageShareService.UploadResult(null, ImageShareService.UploadError.DISABLED);
         }
-        return imageShareService.create(upload);
+        ImageShareService.UploadResult result = imageShareService.create(upload);
+        if (result.isSuccess()) {
+            ImageShare imageShare = result.imageShare();
+            publishAccess(ShortUrlAccessEvent.Action.CREATED, ShortUrlAccessEvent.ResourceType.IMAGE,
+                    imageShare.code(), imageShare.contentType(), imageShare.viewCount(), imageShare.expiresAt(),
+                    imageShare.isPasswordProtected(), "", "");
+        }
+        return result;
     }
 
     public ImageShare resolveImageShare(String code) {
@@ -201,6 +225,42 @@ public final class ShortUrlService {
 
     public boolean verifyImageSharePassword(ImageShare imageShare, String password) {
         return imageShareService != null && imageShareService.verifyPassword(imageShare, password);
+    }
+
+    public ShortUrlEntry recordView(ShortUrlEntry entry, String clientAddress, String userAgent) {
+        if (entry == null) {
+            return null;
+        }
+        ShortUrlEntry viewed = entry.withViewCount(repository.incrementViewCount(entry.code()));
+        publishAccess(ShortUrlAccessEvent.Action.VIEWED, ShortUrlAccessEvent.ResourceType.URL,
+                viewed.code(), viewed.target(), viewed.viewCount(), viewed.expiresAt(), false,
+                clientAddress, userAgent);
+        return viewed;
+    }
+
+    public ImageShare recordImageShareView(ImageShare imageShare, String clientAddress, String userAgent) {
+        if (imageShareService == null || imageShare == null) {
+            return null;
+        }
+        ImageShare viewed = imageShareService.recordView(imageShare);
+        publishAccess(ShortUrlAccessEvent.Action.VIEWED, ShortUrlAccessEvent.ResourceType.IMAGE,
+                viewed.code(), viewed.contentType(), viewed.viewCount(), viewed.expiresAt(),
+                viewed.isPasswordProtected(), clientAddress, userAgent);
+        return viewed;
+    }
+
+    public Long getLogChannelId() {
+        return logChannelId;
+    }
+
+    public void updateLogChannelId(Long channelId) {
+        Long normalized = normalizeChannelId(channelId);
+        repository.saveLogChannelId(normalized);
+        logChannelId = normalized;
+    }
+
+    public void updateAccessPublisher(ShortUrlAccessPublisher publisher) {
+        accessPublisher.set(publisher == null ? ShortUrlAccessPublisher.NO_OP : publisher);
     }
 
     public ImageShareService.Options imageShareOptions() {
@@ -241,7 +301,7 @@ public final class ShortUrlService {
     private String nextAvailableCode(int length) {
         for (int i = 0; i < 10_000; i++) {
             String code = randomCode(length);
-            if (repository.findByCode(code) == null) {
+            if (repository.findByCode(code) == null && !isImageCodeInUse(code)) {
                 return code;
             }
         }
@@ -262,6 +322,9 @@ public final class ShortUrlService {
             return nextAvailableCode(options.get().codeLength());
         }
         if (!domainService.isValidSlug(slug) || domainService.isReservedCode(slug)) {
+            return null;
+        }
+        if (isImageCodeInUse(slug)) {
             return null;
         }
         ShortUrlEntry existing = repository.findByCode(slug);
@@ -288,5 +351,45 @@ public final class ShortUrlService {
         } catch (Exception ignored) {
             return false;
         }
+    }
+
+    private boolean isImageCodeInUse(String code) {
+        return imageShareService != null && imageShareService.isCodeInUse(code);
+    }
+
+    private void publishAccess(ShortUrlAccessEvent.Action action,
+                               ShortUrlAccessEvent.ResourceType resourceType,
+                               String code,
+                               String target,
+                               long viewCount,
+                               long expiresAt,
+                               boolean passwordProtected,
+                               String clientAddress,
+                               String userAgent) {
+        Long channelId = logChannelId;
+        if (channelId == null) {
+            return;
+        }
+        try {
+            accessPublisher.get().publish(channelId, new ShortUrlAccessEvent(
+                    action,
+                    resourceType,
+                    code,
+                    toPublicUrl(code),
+                    target == null ? "" : target,
+                    Math.max(0L, viewCount),
+                    expiresAt,
+                    passwordProtected,
+                    clientAddress == null ? "" : clientAddress,
+                    userAgent == null ? "" : userAgent,
+                    System.currentTimeMillis()
+            ));
+        } catch (RuntimeException ignored) {
+            // Short URL creation and access must remain available if Discord logging is temporarily unavailable.
+        }
+    }
+
+    private Long normalizeChannelId(Long channelId) {
+        return channelId == null || channelId <= 0L ? null : channelId;
     }
 }

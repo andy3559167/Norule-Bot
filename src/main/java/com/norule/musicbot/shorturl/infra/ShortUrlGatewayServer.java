@@ -13,8 +13,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -22,12 +27,19 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public final class ShortUrlGatewayServer {
     private static final long MULTIPART_OVERHEAD_BYTES = 128L * 1024L;
+    private static final long IMAGE_ACCESS_DURATION_MILLIS = 60L * 60L * 1000L;
+    private static final String IMAGE_ACCESS_COOKIE = "nr_image_access";
+    private static final SecureRandom IMAGE_ACCESS_RANDOM = new SecureRandom();
+    private static final DateTimeFormatter IMAGE_DATE_FORMAT = DateTimeFormatter
+            .ofPattern("yyyy/MM/dd HH:mm:ss")
+            .withZone(ZoneId.systemDefault());
     private static final Pattern MULTIPART_BOUNDARY = Pattern.compile("boundary=(?:\\\"([^\\\"]+)\\\"|([^;\\s]+))", Pattern.CASE_INSENSITIVE);
     private static final Pattern CONTENT_DISPOSITION_NAME = Pattern.compile("(?:^|;)\\s*name=\\\"([^\\\"]*)\\\"", Pattern.CASE_INSENSITIVE);
     private static final Set<String> RESERVED_PATHS = Set.of(
@@ -36,6 +48,7 @@ public final class ShortUrlGatewayServer {
 
     private final ShortUrlService shortUrlService;
     private final Supplier<BotConfig.ShortUrl> configSupplier;
+    private final Map<String, ImageAccessGrant> imageAccessGrants = new ConcurrentHashMap<>();
     private volatile HttpServer server;
     private volatile String bindHost = "";
     private volatile int bindPort = -1;
@@ -135,18 +148,31 @@ public final class ShortUrlGatewayServer {
             return;
         }
 
-        String target = shortUrlService.resolveTarget(code);
-        if (target == null || target.isBlank()) {
+        ShortUrlService.ShortUrlEntry entry = shortUrlService.resolve(code);
+        if (entry == null || entry.target().isBlank()) {
             sendHtml(exchange, 404, buildShortUrlNotFoundPage());
             return;
         }
-        exchange.getResponseHeaders().set("Location", target);
+        if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            shortUrlService.recordView(entry, clientAddress(exchange), userAgent(exchange));
+        }
+        exchange.getResponseHeaders().set("Location", entry.target());
         exchange.sendResponseHeaders(302, -1);
         exchange.close();
     }
 
     private void handleShortUrlApi(HttpExchange exchange) throws IOException {
         String path = exchange.getRequestURI().getPath();
+        String contentPathPrefix = "/api/short/image/content/";
+        if (path.startsWith(contentPathPrefix)) {
+            handleImageShareContent(exchange, path.substring(contentPathPrefix.length()));
+            return;
+        }
+        String accessPathPrefix = "/api/short/image/access/";
+        if (path.startsWith(accessPathPrefix)) {
+            handleImageShareAccess(exchange, path.substring(accessPathPrefix.length()));
+            return;
+        }
         if ("/api/short/image/config".equals(path)) {
             handleImageShareConfig(exchange);
             return;
@@ -200,6 +226,7 @@ public final class ShortUrlGatewayServer {
                 .put("code", created.getCode())
                 .put("shortUrl", shortUrlService.toPublicUrl(created.getCode()))
                 .put("targetUrl", created.getTarget())
+                .put("viewCount", created.getViewCount())
                 .toString());
     }
 
@@ -243,14 +270,20 @@ public final class ShortUrlGatewayServer {
                 sendImageError(exchange, 400, "IMAGE_REQUIRED", "An image file is required");
                 return;
             }
-            long requestedRetention = parseRetentionMillis(form.value("retentionHours"), options);
-            if (requestedRetention < 0L) {
+            ExpirationRequest expiration = parseExpirationRequest(form, options);
+            if (expiration == null) {
                 sendImageError(exchange, 400, "RETENTION_TOO_LONG", "The requested retention is outside the allowed range");
                 return;
             }
             boolean passwordProtected = Boolean.parseBoolean(form.value("passwordProtected"));
             ImageShareService.UploadResult result = shortUrlService.createImageShare(
-                    new ImageShareService.Upload(image, passwordProtected, form.value("password"), requestedRetention)
+                    new ImageShareService.Upload(
+                            image,
+                            passwordProtected,
+                            form.value("password"),
+                            expiration.retentionMillis(),
+                            expiration.expiresAtMillis()
+                    )
             );
             if (!result.isSuccess()) {
                 sendImageUploadFailure(exchange, result.error());
@@ -262,6 +295,7 @@ public final class ShortUrlGatewayServer {
                     .put("shortUrl", shortUrlService.toPublicUrl(created.code()))
                     .put("expiresAt", created.expiresAt())
                     .put("passwordProtected", created.isPasswordProtected())
+                    .put("viewCount", created.viewCount())
                     .toString());
         } catch (RequestBodyTooLargeException e) {
             sendImageError(exchange, 413, "IMAGE_TOO_LARGE", "The uploaded image exceeds the configured size limit");
@@ -272,22 +306,73 @@ public final class ShortUrlGatewayServer {
 
     private void handleImageShareResolve(HttpExchange exchange, ImageShare imageShare) throws IOException {
         String method = exchange.getRequestMethod();
-        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method) && !"POST".equalsIgnoreCase(method)) {
+        if (!"GET".equalsIgnoreCase(method) && !"HEAD".equalsIgnoreCase(method)) {
             sendText(exchange, 405, "Method Not Allowed");
             return;
         }
-        if (imageShare.isPasswordProtected()) {
-            boolean authenticated = "POST".equalsIgnoreCase(method)
-                    && shortUrlService.verifyImageSharePassword(imageShare, readPassword(exchange));
-            if (!authenticated) {
-                sendImagePasswordPage(exchange, "POST".equalsIgnoreCase(method));
-                return;
+        if (imageShare.isPasswordProtected() && !hasImageAccess(exchange, imageShare)) {
+            sendImagePasswordPage(exchange, imageShare.code());
+            return;
+        }
+        ImageShare viewed = imageShare;
+        if ("GET".equalsIgnoreCase(method)) {
+            ImageShare recorded = shortUrlService.recordImageShareView(
+                    imageShare,
+                    clientAddress(exchange),
+                    userAgent(exchange)
+            );
+            if (recorded != null) {
+                viewed = recorded;
             }
-        } else if ("POST".equalsIgnoreCase(method)) {
-            sendText(exchange, 405, "Method Not Allowed");
+        }
+        sendHtml(exchange, 200, buildImageViewPage(viewed));
+    }
+
+    private void handleImageShareContent(HttpExchange exchange, String code) throws IOException {
+        if (!isGetOrHead(exchange)) {
+            sendImageError(exchange, 405, "METHOD_NOT_ALLOWED", "Method Not Allowed");
+            return;
+        }
+        if (code == null || code.isBlank() || code.contains("/")) {
+            sendImageError(exchange, 404, "IMAGE_NOT_FOUND", "Image share not found");
+            return;
+        }
+        ImageShare imageShare = shortUrlService.resolveImageShare(code);
+        if (imageShare == null) {
+            sendImageError(exchange, 404, "IMAGE_NOT_FOUND", "Image share not found");
+            return;
+        }
+        if (imageShare.isPasswordProtected() && !hasImageAccess(exchange, imageShare)) {
+            sendImageError(exchange, 403, "IMAGE_ACCESS_REQUIRED", "Image password access is required");
             return;
         }
         sendImage(exchange, imageShare);
+    }
+
+    private void handleImageShareAccess(HttpExchange exchange, String code) throws IOException {
+        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
+            sendImageError(exchange, 405, "METHOD_NOT_ALLOWED", "Method Not Allowed");
+            return;
+        }
+        if (code == null || code.isBlank() || code.contains("/")) {
+            sendImageError(exchange, 404, "IMAGE_NOT_FOUND", "Image share not found");
+            return;
+        }
+        ImageShare imageShare = shortUrlService.resolveImageShare(code);
+        if (imageShare == null) {
+            sendImageError(exchange, 404, "IMAGE_NOT_FOUND", "Image share not found");
+            return;
+        }
+        if (!imageShare.isPasswordProtected()) {
+            sendJson(exchange, 200, DataObject.empty().put("ok", true).toString());
+            return;
+        }
+        if (!shortUrlService.verifyImageSharePassword(imageShare, readPassword(exchange))) {
+            sendImageError(exchange, 403, "INVALID_PASSWORD", "Incorrect password");
+            return;
+        }
+        issueImageAccess(exchange, imageShare);
+        sendJson(exchange, 200, DataObject.empty().put("ok", true).toString());
     }
 
     private String readPassword(HttpExchange exchange) throws IOException {
@@ -300,17 +385,72 @@ public final class ShortUrlGatewayServer {
         }
     }
 
-    private void sendImagePasswordPage(HttpExchange exchange, boolean incorrectPassword) throws IOException {
-        String feedback = incorrectPassword
-                ? "<p class=\"error\">Incorrect password. Please try again.</p>"
-                : "";
-        String html = """
-                <!doctype html>
-                <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-                <title>Protected Image</title><style>body{font-family:system-ui,sans-serif;background:#101827;color:#f8fafc;display:grid;min-height:100vh;place-items:center;margin:0}.card{width:min(90vw,360px);background:#1e293b;padding:2rem;border-radius:1rem}label,input,button{display:block;width:100%;box-sizing:border-box}input,button{margin-top:.5rem;padding:.75rem;border-radius:.5rem;border:0}button{background:#06b6d4;color:#082f49;font-weight:700}.error{color:#fda4af}</style>
-                </head><body><main class="card"><h1>Protected image</h1><p>Enter the password to view this image.</p>%s<form method="post"><label for="password">Password</label><input id="password" name="password" type="password" required autofocus><button type="submit">View image</button></form></main></body></html>
-                """.formatted(feedback);
-        sendHtml(exchange, 401, html);
+    private void sendImagePasswordPage(HttpExchange exchange, String code) throws IOException {
+        sendHtml(exchange, 200, buildImagePasswordPage(code));
+    }
+
+    static String buildImagePasswordPage(String code) {
+        return loadTemplateResource("web/image-password.html")
+                .replace("__IMAGE_CODE__", htmlEscape(code));
+    }
+
+    static String buildImageViewPage(ImageShare imageShare) {
+        String status = imageShare.isPasswordProtected() ? "密碼保護" : "公開分享";
+        return renderTemplateString(loadTemplateResource("web/image-view.html"), Map.of(
+                "__IMAGE_CODE__", htmlEscape(imageShare.code()),
+                "__IMAGE_CONTENT_URL__", "/api/short/image/content/" + htmlEscape(imageShare.code()),
+                "__IMAGE_STATUS__", status,
+                "__IMAGE_VIEWS__", String.format(Locale.ROOT, "%,d", imageShare.viewCount()),
+                "__IMAGE_EXPIRES__", IMAGE_DATE_FORMAT.format(Instant.ofEpochMilli(imageShare.expiresAt())),
+                "__IMAGE_TYPE__", htmlEscape(imageShare.contentType()),
+                "__IMAGE_SIZE__", formatFileSize(imageShare.sizeBytes())
+        ));
+    }
+
+    private boolean hasImageAccess(HttpExchange exchange, ImageShare imageShare) {
+        cleanupImageAccessGrants();
+        String accessToken = readCookie(exchange, IMAGE_ACCESS_COOKIE);
+        if (accessToken.isBlank()) {
+            return false;
+        }
+        ImageAccessGrant grant = imageAccessGrants.get(accessToken);
+        return grant != null
+                && grant.code().equals(imageShare.code())
+                && grant.expiresAt() > System.currentTimeMillis();
+    }
+
+    private void issueImageAccess(HttpExchange exchange, ImageShare imageShare) {
+        cleanupImageAccessGrants();
+        byte[] randomBytes = new byte[32];
+        IMAGE_ACCESS_RANDOM.nextBytes(randomBytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+        long expiresAt = Math.min(imageShare.expiresAt(), System.currentTimeMillis() + IMAGE_ACCESS_DURATION_MILLIS);
+        imageAccessGrants.put(token, new ImageAccessGrant(imageShare.code(), expiresAt));
+        long maxAgeSeconds = Math.max(1L, (expiresAt - System.currentTimeMillis()) / 1000L);
+        String cookie = IMAGE_ACCESS_COOKIE + "=" + token + "; Max-Age=" + maxAgeSeconds + "; Path=/; HttpOnly; SameSite=Lax";
+        if ("https".equalsIgnoreCase(exchange.getRequestHeaders().getFirst("X-Forwarded-Proto"))) {
+            cookie += "; Secure";
+        }
+        exchange.getResponseHeaders().add("Set-Cookie", cookie);
+    }
+
+    private void cleanupImageAccessGrants() {
+        long now = System.currentTimeMillis();
+        imageAccessGrants.entrySet().removeIf(entry -> entry.getValue().expiresAt() <= now);
+    }
+
+    private String readCookie(HttpExchange exchange, String name) {
+        String header = exchange.getRequestHeaders().getFirst("Cookie");
+        if (header == null || header.isBlank()) {
+            return "";
+        }
+        for (String part : header.split(";")) {
+            String[] pair = part.trim().split("=", 2);
+            if (pair.length == 2 && name.equals(pair[0].trim())) {
+                return pair[1].trim();
+            }
+        }
+        return "";
     }
 
     private void sendImage(HttpExchange exchange, ImageShare imageShare) throws IOException {
@@ -403,19 +543,38 @@ public final class ShortUrlGatewayServer {
         return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
     }
 
-    private long parseRetentionMillis(String rawHours, ImageShareService.Options options) {
-        if (rawHours == null || rawHours.isBlank()) {
-            return 0L;
-        }
+    private ExpirationRequest parseExpirationRequest(MultipartForm form, ImageShareService.Options options) {
         try {
-            long hours = Long.parseLong(rawHours.trim());
-            long maxHours = options.maxRetentionMillis() / (60L * 60L * 1000L);
-            if (hours < 1L || hours > maxHours) {
-                return -1L;
+            String rawExpiresAt = form.value("expiresAt");
+            if (!rawExpiresAt.isBlank()) {
+                long expiresAt = Long.parseLong(rawExpiresAt);
+                long retention = expiresAt - System.currentTimeMillis();
+                if (retention <= 0L || retention > options.maxRetentionMillis()) {
+                    return null;
+                }
+                return new ExpirationRequest(0L, expiresAt);
             }
-            return Math.multiplyExact(hours, 60L * 60L * 1000L);
+
+            String rawMinutes = form.value("retentionMinutes");
+            if (!rawMinutes.isBlank()) {
+                long minutes = Long.parseLong(rawMinutes);
+                long retention = Math.multiplyExact(minutes, 60L * 1000L);
+                return retention > 0L && retention <= options.maxRetentionMillis()
+                        ? new ExpirationRequest(retention, 0L)
+                        : null;
+            }
+
+            String rawHours = form.value("retentionHours");
+            if (rawHours.isBlank()) {
+                return new ExpirationRequest(0L, 0L);
+            }
+            long hours = Long.parseLong(rawHours);
+            long retention = Math.multiplyExact(hours, 60L * 60L * 1000L);
+            return retention > 0L && retention <= options.maxRetentionMillis()
+                    ? new ExpirationRequest(retention, 0L)
+                    : null;
         } catch (Exception ignored) {
-            return -1L;
+            return null;
         }
     }
 
@@ -570,6 +729,10 @@ public final class ShortUrlGatewayServer {
     }
 
     private String loadTemplate(String resourcePath) {
+        return loadTemplateResource(resourcePath);
+    }
+
+    private static String loadTemplateResource(String resourcePath) {
         String normalizedPath = resourcePath.startsWith("/") ? resourcePath : "/" + resourcePath;
         try (InputStream input = ShortUrlGatewayServer.class.getResourceAsStream(normalizedPath)) {
             if (input == null) {
@@ -581,12 +744,51 @@ public final class ShortUrlGatewayServer {
         }
     }
 
-    private String renderTemplateString(String template, Map<String, String> replacements) {
+    private static String renderTemplateString(String template, Map<String, String> replacements) {
         String rendered = template;
         for (Map.Entry<String, String> entry : replacements.entrySet()) {
             rendered = rendered.replace(entry.getKey(), entry.getValue());
         }
         return rendered;
+    }
+
+    private static String htmlEscape(String value) {
+        return value == null ? "" : value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
+    }
+
+    private static String formatFileSize(long sizeBytes) {
+        if (sizeBytes >= 1024L * 1024L) {
+            return String.format(Locale.ROOT, "%.2f MB", sizeBytes / (1024.0 * 1024.0));
+        }
+        if (sizeBytes >= 1024L) {
+            return String.format(Locale.ROOT, "%.1f KB", sizeBytes / 1024.0);
+        }
+        return Math.max(0L, sizeBytes) + " B";
+    }
+
+    private String clientAddress(HttpExchange exchange) {
+        String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            return forwarded.split(",", 2)[0].trim();
+        }
+        InetSocketAddress remoteAddress = exchange.getRemoteAddress();
+        return remoteAddress == null || remoteAddress.getAddress() == null
+                ? "unknown"
+                : remoteAddress.getAddress().getHostAddress();
+    }
+
+    private String userAgent(HttpExchange exchange) {
+        String value = exchange.getRequestHeaders().getFirst("User-Agent");
+        if (value == null || value.isBlank()) {
+            return "unknown";
+        }
+        String normalized = value.trim();
+        return normalized.length() <= 240 ? normalized : normalized.substring(0, 240);
     }
 
     private Map<String, String> parseUrlEncoded(String raw) {
@@ -683,6 +885,12 @@ public final class ShortUrlGatewayServer {
     }
 
     private record MultipartPart(String name, byte[] content) {
+    }
+
+    private record ExpirationRequest(long retentionMillis, long expiresAtMillis) {
+    }
+
+    private record ImageAccessGrant(String code, long expiresAt) {
     }
 
     private static final class MultipartForm {

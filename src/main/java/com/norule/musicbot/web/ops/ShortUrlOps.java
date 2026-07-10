@@ -24,4 +24,8 @@ public final class ShortUrlOps {
     public ShortUrl findActiveByTarget(String url) {
         return shortUrlService.findActiveByTarget(url);
     }
+
+    public ShortUrl recordView(String code, String clientAddress, String userAgent) {
+        return shortUrlService.recordView(code, clientAddress, userAgent);
+    }
 }

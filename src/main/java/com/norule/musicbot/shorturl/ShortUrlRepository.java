@@ -12,4 +12,10 @@ public interface ShortUrlRepository {
     void deleteByCode(String code);
 
     int cleanupExpired(long nowMillis);
+
+    long incrementViewCount(String code);
+
+    Long findLogChannelId();
+
+    void saveLogChannelId(Long channelId);
 }

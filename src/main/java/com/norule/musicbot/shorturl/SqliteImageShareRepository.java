@@ -22,14 +22,25 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
                 size_bytes INTEGER NOT NULL,
                 created_at INTEGER NOT NULL,
                 expires_at INTEGER NOT NULL,
-                password_hash TEXT NOT NULL DEFAULT ''
+                password_hash TEXT NOT NULL DEFAULT '',
+                content_hash TEXT NOT NULL DEFAULT '',
+                view_count INTEGER NOT NULL DEFAULT 0
             )
             """;
     private static final String CREATE_INDEX = "CREATE INDEX IF NOT EXISTS idx_short_url_images_expires ON short_url_images(expires_at)";
-    private static final String SELECT_BY_CODE = "SELECT code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash FROM short_url_images WHERE code = ?";
-    private static final String INSERT = "INSERT INTO short_url_images (code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    private static final String CREATE_CONTENT_HASH_INDEX = "CREATE INDEX IF NOT EXISTS idx_short_url_images_content_hash_expires ON short_url_images(content_hash, expires_at)";
+    private static final String SELECT_BY_CODE = "SELECT code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count FROM short_url_images WHERE code = ?";
+    private static final String SELECT_ACTIVE_BY_CONTENT_HASH = """
+            SELECT code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count
+            FROM short_url_images
+            WHERE content_hash = ? AND expires_at > ?
+            ORDER BY created_at DESC
+            """;
+    private static final String INSERT = "INSERT INTO short_url_images (code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
     private static final String DELETE_BY_CODE = "DELETE FROM short_url_images WHERE code = ?";
-    private static final String SELECT_EXPIRED = "SELECT code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash FROM short_url_images WHERE expires_at <= ?";
+    private static final String SELECT_EXPIRED = "SELECT code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count FROM short_url_images WHERE expires_at <= ?";
+    private static final String INCREMENT_VIEW_COUNT = "UPDATE short_url_images SET view_count = view_count + 1 WHERE code = ?";
+    private static final String SELECT_VIEW_COUNT = "SELECT view_count FROM short_url_images WHERE code = ?";
 
     private final String jdbcUrl;
 
@@ -65,6 +76,27 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
     }
 
     @Override
+    public List<ImageShare> findActiveByContentHash(String contentHash, long nowMillis) {
+        if (contentHash == null || contentHash.isBlank()) {
+            return List.of();
+        }
+        List<ImageShare> matches = new ArrayList<>();
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+             PreparedStatement statement = connection.prepareStatement(SELECT_ACTIVE_BY_CONTENT_HASH)) {
+            statement.setString(1, contentHash);
+            statement.setLong(2, nowMillis);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                while (resultSet.next()) {
+                    matches.add(mapRow(resultSet));
+                }
+            }
+            return matches;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to query image share by content hash", e);
+        }
+    }
+
+    @Override
     public void save(ImageShare imageShare) {
         try (Connection connection = DriverManager.getConnection(jdbcUrl);
              PreparedStatement statement = connection.prepareStatement(INSERT)) {
@@ -75,6 +107,8 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
             statement.setLong(5, imageShare.createdAt());
             statement.setLong(6, imageShare.expiresAt());
             statement.setString(7, imageShare.passwordHash());
+            statement.setString(8, imageShare.contentHash());
+            statement.setLong(9, imageShare.viewCount());
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to save image share", e);
@@ -109,11 +143,34 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
         }
     }
 
+    @Override
+    public long incrementViewCount(String code) {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl)) {
+            try (PreparedStatement update = connection.prepareStatement(INCREMENT_VIEW_COUNT)) {
+                update.setString(1, code);
+                if (update.executeUpdate() == 0) {
+                    return 0L;
+                }
+            }
+            try (PreparedStatement select = connection.prepareStatement(SELECT_VIEW_COUNT)) {
+                select.setString(1, code);
+                try (ResultSet resultSet = select.executeQuery()) {
+                    return resultSet.next() ? resultSet.getLong("view_count") : 0L;
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to increment image share view count", e);
+        }
+    }
+
     private void initializeSchema() {
         try (Connection connection = DriverManager.getConnection(jdbcUrl);
              Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            ensureContentHashColumn(connection, statement);
+            ensureViewCountColumn(connection, statement);
             statement.execute(CREATE_INDEX);
+            statement.execute(CREATE_CONTENT_HASH_INDEX);
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to initialize image-share sqlite schema", e);
         }
@@ -127,7 +184,33 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
                 resultSet.getLong("size_bytes"),
                 resultSet.getLong("created_at"),
                 resultSet.getLong("expires_at"),
-                resultSet.getString("password_hash")
+                resultSet.getString("password_hash"),
+                resultSet.getString("content_hash"),
+                resultSet.getLong("view_count")
         );
+    }
+
+    private void ensureContentHashColumn(Connection connection, Statement statement) throws SQLException {
+        try (Statement tableInfo = connection.createStatement();
+             ResultSet columns = tableInfo.executeQuery("PRAGMA table_info(short_url_images)")) {
+            while (columns.next()) {
+                if ("content_hash".equalsIgnoreCase(columns.getString("name"))) {
+                    return;
+                }
+            }
+        }
+        statement.execute("ALTER TABLE short_url_images ADD COLUMN content_hash TEXT NOT NULL DEFAULT ''");
+    }
+
+    private void ensureViewCountColumn(Connection connection, Statement statement) throws SQLException {
+        try (Statement tableInfo = connection.createStatement();
+             ResultSet columns = tableInfo.executeQuery("PRAGMA table_info(short_url_images)")) {
+            while (columns.next()) {
+                if ("view_count".equalsIgnoreCase(columns.getString("name"))) {
+                    return;
+                }
+            }
+        }
+        statement.execute("ALTER TABLE short_url_images ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0");
     }
 }

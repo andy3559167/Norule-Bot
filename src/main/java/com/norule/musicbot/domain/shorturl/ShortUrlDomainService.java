@@ -66,7 +66,7 @@ public final class ShortUrlDomainService {
             return false;
         }
         String normalized = slug.trim().toLowerCase(Locale.ROOT);
-        return RESERVED_CODES.contains(normalized) || normalized.startsWith("image-");
+        return RESERVED_CODES.contains(normalized);
     }
 
     public boolean isPrivateOrLocalTarget(String target) {
