@@ -63,19 +63,20 @@
       <div class="short-url-card-heading">
         <span class="short-url-card-icon short-url-card-icon--image" aria-hidden="true">&#9670;</span>
         <div>
-          <span class="short-url-card-eyebrow">IMAGE</span>
-          <h2 id="imageShareTitle">Share an image</h2>
+          <span class="short-url-card-eyebrow">MEDIA</span>
+          <h2 id="imageShareTitle">Share an image or video</h2>
           <p id="imageShareSubtitle">Upload once and send a clean short link.</p>
         </div>
       </div>
 
       <form id="imageShareForm" class="short-url-form">
         <label class="short-url-upload" for="imageFile">
-          <input id="imageFile" name="image" type="file" accept="image/png,image/jpeg,image/gif,image/webp" required />
+          <input id="imageFile" name="image" type="file"
+                 accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/webm" required />
           <span class="short-url-upload-icon" aria-hidden="true">&#8593;</span>
           <span class="short-url-upload-copy">
-            <strong id="imageFileLabel">Choose an image</strong>
-            <small id="imageLimitHint">PNG, JPEG, GIF, and WebP up to 20 MB.</small>
+            <strong id="imageFileLabel">Choose an image or video</strong>
+            <small id="imageLimitHint">Images up to 20 MB; MP4 and WebM up to 100 MB and 5 minutes.</small>
           </span>
           <span id="imageFileName" class="short-url-upload-name"></span>
         </label>
@@ -109,20 +110,25 @@
               <span class="short-url-switch-track" aria-hidden="true"></span>
               <span id="imagePasswordProtectedLabel">Protect with password</span>
             </label>
-            <label id="imagePasswordField" class="short-url-field hidden" for="imagePassword">
-              <span id="imagePasswordLabel">Password</span>
-              <input id="imagePassword" name="password" type="password" minlength="4" maxlength="128" />
+            <div id="imagePasswordField" class="short-url-field is-disabled">
+              <label id="imagePasswordLabel" for="imagePassword">Password</label>
+              <div class="short-url-password-input">
+                <input id="imagePassword" name="password" type="password" minlength="4" maxlength="128" disabled />
+                <button id="imagePasswordVisibility" type="button" disabled aria-pressed="false">
+                  <span id="imagePasswordVisibilityText">Show</span>
+                </button>
+              </div>
               <small id="imagePasswordHint"></small>
-            </label>
+            </div>
           </div>
         </div>
 
-        <button id="createImageShareBtn" type="submit" class="short-url-submit short-url-submit--image">Create image link</button>
+        <button id="createImageShareBtn" type="submit" class="short-url-submit short-url-submit--image">Create media link</button>
       </form>
 
       <p id="imageErrorText" class="short-url-error hidden" role="alert"></p>
       <section id="imageResultCard" class="short-url-result short-url-result--image hidden" aria-live="polite">
-        <div class="short-url-result-label" id="imageResultTitle">Image link</div>
+        <div class="short-url-result-label" id="imageResultTitle">Media link</div>
         <a id="imageResultUrl" class="short-url-result-link" href="#" target="_blank" rel="noreferrer noopener"></a>
         <p class="short-url-result-meta"><span id="imageExpiresLabel">Expires</span><span id="imageExpiresAt"></span></p>
         <button id="copyImageShareBtn" type="button" class="short-url-copy">Copy link</button>

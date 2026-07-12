@@ -148,6 +148,11 @@ public final class ShortUrlGatewayServer {
             return;
         }
 
+        if (shortUrlService.findExpiredImageShare(code) != null) {
+            sendHtml(exchange, 410, buildImageExpiredPage());
+            return;
+        }
+
         ShortUrlService.ShortUrlEntry entry = shortUrlService.resolve(code);
         if (entry == null || entry.target().isBlank()) {
             sendHtml(exchange, 404, buildShortUrlNotFoundPage());
@@ -249,6 +254,10 @@ public final class ShortUrlGatewayServer {
                 .put("maxRetentionDays", options.maxRetentionMillis() / (24L * 60L * 60L * 1000L))
                 .put("maxFileSizeBytes", options.maxFileSizeBytes())
                 .put("maxFileSizeMb", options.maxFileSizeBytes() / (1024L * 1024L))
+                .put("maxVideoFileSizeBytes", options.maxVideoFileSizeBytes())
+                .put("maxVideoFileSizeMb", options.maxVideoFileSizeBytes() / (1024L * 1024L))
+                .put("maxVideoDurationSeconds", options.maxVideoDurationMillis() / 1000L)
+                .put("expiredShareRetentionDays", options.expiredShareRetentionMillis() / (24L * 60L * 60L * 1000L))
                 .toString());
     }
 
@@ -264,10 +273,10 @@ public final class ShortUrlGatewayServer {
         }
 
         try {
-            MultipartForm form = parseMultipartForm(exchange, options.maxFileSizeBytes());
-            byte[] image = form.firstFile("image");
-            if (image == null) {
-                sendImageError(exchange, 400, "IMAGE_REQUIRED", "An image file is required");
+            MultipartForm form = parseMultipartForm(exchange, options.maxUploadSizeBytes());
+            byte[] media = form.firstFile("image");
+            if (media == null) {
+                sendImageError(exchange, 400, "IMAGE_REQUIRED", "An image or video file is required");
                 return;
             }
             ExpirationRequest expiration = parseExpirationRequest(form, options);
@@ -278,7 +287,7 @@ public final class ShortUrlGatewayServer {
             boolean passwordProtected = Boolean.parseBoolean(form.value("passwordProtected"));
             ImageShareService.UploadResult result = shortUrlService.createImageShare(
                     new ImageShareService.Upload(
-                            image,
+                            media,
                             passwordProtected,
                             form.value("password"),
                             expiration.retentionMillis(),
@@ -298,9 +307,9 @@ public final class ShortUrlGatewayServer {
                     .put("viewCount", created.viewCount())
                     .toString());
         } catch (RequestBodyTooLargeException e) {
-            sendImageError(exchange, 413, "IMAGE_TOO_LARGE", "The uploaded image exceeds the configured size limit");
+            sendImageError(exchange, 413, "MEDIA_TOO_LARGE", "The uploaded file exceeds the configured size limit");
         } catch (InvalidMultipartException e) {
-            sendImageError(exchange, 400, "INVALID_IMAGE_UPLOAD", "Invalid image upload request");
+            sendImageError(exchange, 400, "INVALID_MEDIA_UPLOAD", "Invalid media upload request");
         }
     }
 
@@ -339,6 +348,10 @@ public final class ShortUrlGatewayServer {
         }
         ImageShare imageShare = shortUrlService.resolveImageShare(code);
         if (imageShare == null) {
+            if (shortUrlService.findExpiredImageShare(code) != null) {
+                sendImageError(exchange, 410, "SHARE_EXPIRED", "This share has expired");
+                return;
+            }
             sendImageError(exchange, 404, "IMAGE_NOT_FOUND", "Image share not found");
             return;
         }
@@ -346,7 +359,7 @@ public final class ShortUrlGatewayServer {
             sendImageError(exchange, 403, "IMAGE_ACCESS_REQUIRED", "Image password access is required");
             return;
         }
-        sendImage(exchange, imageShare);
+        sendMedia(exchange, imageShare);
     }
 
     private void handleImageShareAccess(HttpExchange exchange, String code) throws IOException {
@@ -360,6 +373,10 @@ public final class ShortUrlGatewayServer {
         }
         ImageShare imageShare = shortUrlService.resolveImageShare(code);
         if (imageShare == null) {
+            if (shortUrlService.findExpiredImageShare(code) != null) {
+                sendImageError(exchange, 410, "SHARE_EXPIRED", "This share has expired");
+                return;
+            }
             sendImageError(exchange, 404, "IMAGE_NOT_FOUND", "Image share not found");
             return;
         }
@@ -396,15 +413,29 @@ public final class ShortUrlGatewayServer {
 
     static String buildImageViewPage(ImageShare imageShare) {
         String status = imageShare.isPasswordProtected() ? "密碼保護" : "公開分享";
-        return renderTemplateString(loadTemplateResource("web/image-view.html"), Map.of(
-                "__IMAGE_CODE__", htmlEscape(imageShare.code()),
-                "__IMAGE_CONTENT_URL__", "/api/short/image/content/" + htmlEscape(imageShare.code()),
-                "__IMAGE_STATUS__", status,
-                "__IMAGE_VIEWS__", String.format(Locale.ROOT, "%,d", imageShare.viewCount()),
-                "__IMAGE_EXPIRES__", IMAGE_DATE_FORMAT.format(Instant.ofEpochMilli(imageShare.expiresAt())),
-                "__IMAGE_TYPE__", htmlEscape(imageShare.contentType()),
-                "__IMAGE_SIZE__", formatFileSize(imageShare.sizeBytes())
+        boolean video = imageShare.isVideo();
+        String mediaName = video ? "影片" : "圖片";
+        String contentUrl = "/api/short/image/content/" + htmlEscape(imageShare.code());
+        String mediaElement = video
+                ? "<video controls preload=\"metadata\" playsinline>"
+                + "<source src=\"" + contentUrl + "\" type=\"" + htmlEscape(imageShare.contentType()) + "\" />"
+                + "您的瀏覽器不支援影片播放。</video>"
+                : "<img src=\"" + contentUrl + "\" alt=\"分享圖片 " + htmlEscape(imageShare.code()) + "\" />";
+        return renderTemplateString(loadTemplateResource("web/image-view.html"), Map.ofEntries(
+                Map.entry("__MEDIA_NAME__", mediaName),
+                Map.entry("__MEDIA_EYEBROW__", video ? "SHARED VIDEO" : "SHARED IMAGE"),
+                Map.entry("__MEDIA_ELEMENT__", mediaElement),
+                Map.entry("__IMAGE_CODE__", htmlEscape(imageShare.code())),
+                Map.entry("__IMAGE_STATUS__", status),
+                Map.entry("__IMAGE_VIEWS__", String.format(Locale.ROOT, "%,d", imageShare.viewCount())),
+                Map.entry("__IMAGE_EXPIRES__", IMAGE_DATE_FORMAT.format(Instant.ofEpochMilli(imageShare.expiresAt()))),
+                Map.entry("__IMAGE_TYPE__", htmlEscape(imageShare.contentType())),
+                Map.entry("__IMAGE_SIZE__", formatFileSize(imageShare.sizeBytes()))
         ));
+    }
+
+    static String buildImageExpiredPage() {
+        return loadTemplateResource("web/share-expired.html");
     }
 
     private boolean hasImageAccess(HttpExchange exchange, ImageShare imageShare) {
@@ -453,27 +484,102 @@ public final class ShortUrlGatewayServer {
         return "";
     }
 
-    private void sendImage(HttpExchange exchange, ImageShare imageShare) throws IOException {
+    private void sendMedia(HttpExchange exchange, ImageShare imageShare) throws IOException {
+        long fileSize = imageShare.sizeBytes();
+        exchange.getResponseHeaders().set("Content-Type", imageShare.contentType());
+        exchange.getResponseHeaders().set("Content-Disposition", "inline; filename=\"" + imageShare.storageName() + "\"");
+        exchange.getResponseHeaders().set("Cache-Control", "no-store");
+        exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+        exchange.getResponseHeaders().set("Accept-Ranges", "bytes");
         if ("HEAD".equalsIgnoreCase(exchange.getRequestMethod())) {
-            exchange.getResponseHeaders().set("Content-Type", imageShare.contentType());
-            exchange.getResponseHeaders().set("Cache-Control", "no-store");
-            exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
+            exchange.getResponseHeaders().set("Content-Length", String.valueOf(fileSize));
             exchange.sendResponseHeaders(200, -1);
             exchange.close();
             return;
         }
+
+        String rangeHeader = exchange.getRequestHeaders().getFirst("Range");
+        ByteRange range = null;
+        if (rangeHeader != null && !rangeHeader.isBlank()) {
+            range = parseByteRange(rangeHeader, fileSize);
+            if (range == null) {
+                exchange.getResponseHeaders().set("Content-Range", "bytes */" + fileSize);
+                exchange.sendResponseHeaders(416, -1);
+                exchange.close();
+                return;
+            }
+        }
         try (InputStream input = shortUrlService.openImageShare(imageShare)) {
             if (input == null) {
+                if (shortUrlService.findExpiredImageShare(imageShare.code()) != null) {
+                    sendHtml(exchange, 410, buildImageExpiredPage());
+                    return;
+                }
                 sendHtml(exchange, 404, buildShortUrlNotFoundPage());
                 return;
             }
-            exchange.getResponseHeaders().set("Content-Type", imageShare.contentType());
-            exchange.getResponseHeaders().set("Content-Disposition", "inline; filename=\"" + imageShare.storageName() + "\"");
-            exchange.getResponseHeaders().set("Cache-Control", "no-store");
-            exchange.getResponseHeaders().set("X-Content-Type-Options", "nosniff");
-            exchange.sendResponseHeaders(200, imageShare.sizeBytes());
-            input.transferTo(exchange.getResponseBody());
+            long start = range == null ? 0L : range.start();
+            long length = range == null ? fileSize : range.length();
+            if (range != null) {
+                exchange.getResponseHeaders().set("Content-Range",
+                        "bytes " + range.start() + "-" + range.end() + "/" + fileSize);
+            }
+            input.skipNBytes(start);
+            exchange.sendResponseHeaders(range == null ? 200 : 206, length);
+            transferBytes(input, exchange, length);
             exchange.close();
+        }
+    }
+
+    static ByteRange parseByteRange(String rangeHeader, long fileSize) {
+        if (rangeHeader == null || fileSize <= 0L) {
+            return null;
+        }
+        String normalizedHeader = rangeHeader.trim();
+        if (!normalizedHeader.regionMatches(true, 0, "bytes=", 0, "bytes=".length())) {
+            return null;
+        }
+        String value = normalizedHeader.substring("bytes=".length()).trim();
+        if (value.isBlank() || value.contains(",")) {
+            return null;
+        }
+        String[] bounds = value.split("-", -1);
+        if (bounds.length != 2) {
+            return null;
+        }
+        try {
+            long start;
+            long end;
+            if (bounds[0].isBlank()) {
+                long suffixLength = Long.parseLong(bounds[1]);
+                if (suffixLength <= 0L) {
+                    return null;
+                }
+                start = Math.max(0L, fileSize - suffixLength);
+                end = fileSize - 1L;
+            } else {
+                start = Long.parseLong(bounds[0]);
+                end = bounds[1].isBlank() ? fileSize - 1L : Long.parseLong(bounds[1]);
+                end = Math.min(end, fileSize - 1L);
+            }
+            return start >= 0L && start < fileSize && end >= start
+                    ? new ByteRange(start, end)
+                    : null;
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    private void transferBytes(InputStream input, HttpExchange exchange, long length) throws IOException {
+        byte[] buffer = new byte[8192];
+        long remaining = length;
+        while (remaining > 0L) {
+            int read = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+            if (read < 0) {
+                break;
+            }
+            exchange.getResponseBody().write(buffer, 0, read);
+            remaining -= read;
         }
     }
 
@@ -484,11 +590,15 @@ public final class ShortUrlGatewayServer {
         }
         switch (error) {
             case DISABLED -> sendImageError(exchange, 503, "IMAGE_SHARING_DISABLED", "Image sharing is disabled");
-            case IMAGE_REQUIRED -> sendImageError(exchange, 400, "IMAGE_REQUIRED", "An image file is required");
-            case UNSUPPORTED_IMAGE -> sendImageError(exchange, 400, "UNSUPPORTED_IMAGE", "Only PNG, JPEG, GIF, and WebP images are supported");
+            case IMAGE_REQUIRED -> sendImageError(exchange, 400, "IMAGE_REQUIRED", "An image or video file is required");
+            case UNSUPPORTED_MEDIA -> sendImageError(exchange, 400, "UNSUPPORTED_MEDIA", "Only PNG, JPEG, GIF, WebP, MP4, and WebM files are supported");
             case IMAGE_TOO_LARGE -> sendImageError(exchange, 413, "IMAGE_TOO_LARGE", "The uploaded image exceeds the configured size limit");
+            case VIDEO_TOO_LARGE -> sendImageError(exchange, 413, "VIDEO_TOO_LARGE", "The uploaded video exceeds the configured size limit");
+            case VIDEO_TOO_LONG -> sendImageError(exchange, 400, "VIDEO_TOO_LONG", "The uploaded video exceeds the configured duration limit");
             case RETENTION_TOO_LONG -> sendImageError(exchange, 400, "RETENTION_TOO_LONG", "The requested retention is outside the allowed range");
             case INVALID_PASSWORD -> sendImageError(exchange, 400, "INVALID_PASSWORD", "Password must contain 4 to 128 characters");
+            case STORAGE_FAILED -> sendImageError(exchange, 500, "MEDIA_STORAGE_FAILED", "Unable to store the uploaded media");
+            case PERSISTENCE_FAILED -> sendImageError(exchange, 500, "MEDIA_PERSISTENCE_FAILED", "Unable to save the media share record");
             case CREATE_FAILED -> sendImageError(exchange, 500, "IMAGE_CREATE_FAILED", "Unable to create image share");
         }
     }
@@ -891,6 +1001,12 @@ public final class ShortUrlGatewayServer {
     }
 
     private record ImageAccessGrant(String code, long expiresAt) {
+    }
+
+    record ByteRange(long start, long end) {
+        long length() {
+            return end - start + 1L;
+        }
     }
 
     private static final class MultipartForm {

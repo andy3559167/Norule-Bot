@@ -20,6 +20,7 @@ public record ShortUrlAccessEvent(
 
     public enum ResourceType {
         URL,
-        IMAGE
+        IMAGE,
+        VIDEO
     }
 }

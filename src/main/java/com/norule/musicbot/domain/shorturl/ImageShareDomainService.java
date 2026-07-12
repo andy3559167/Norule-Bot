@@ -7,24 +7,32 @@ import java.util.Locale;
 public final class ImageShareDomainService {
     private static final DateTimeFormatter DEFAULT_PASSWORD_FORMAT = DateTimeFormatter.ofPattern("MMdd");
 
-    public record ImageType(String contentType, String extension) {
+    public record MediaType(String contentType, String extension, boolean video, long durationMillis) {
     }
 
-    public ImageType detectImageType(byte[] content) {
+    public MediaType detectMediaType(byte[] content) {
         if (content == null || content.length < 3) {
             return null;
         }
         if (isPng(content)) {
-            return new ImageType("image/png", "png");
+            return new MediaType("image/png", "png", false, 0L);
         }
         if (isJpeg(content)) {
-            return new ImageType("image/jpeg", "jpg");
+            return new MediaType("image/jpeg", "jpg", false, 0L);
         }
         if (isGif(content)) {
-            return new ImageType("image/gif", "gif");
+            return new MediaType("image/gif", "gif", false, 0L);
         }
         if (isWebp(content)) {
-            return new ImageType("image/webp", "webp");
+            return new MediaType("image/webp", "webp", false, 0L);
+        }
+        long mp4Duration = Mp4VideoMetadataParser.readDurationMillis(content);
+        if (mp4Duration > 0L) {
+            return new MediaType("video/mp4", "mp4", true, mp4Duration);
+        }
+        long webmDuration = WebmVideoMetadataParser.readDurationMillis(content);
+        if (webmDuration > 0L) {
+            return new MediaType("video/webm", "webm", true, webmDuration);
         }
         return null;
     }
@@ -66,7 +74,8 @@ public final class ImageShareDomainService {
         if (content.length < 6) {
             return false;
         }
-        String header = new String(content, 0, 6, java.nio.charset.StandardCharsets.US_ASCII).toUpperCase(Locale.ROOT);
+        String header = new String(content, 0, 6, java.nio.charset.StandardCharsets.US_ASCII)
+                .toUpperCase(Locale.ROOT);
         return "GIF87A".equals(header) || "GIF89A".equals(header);
     }
 

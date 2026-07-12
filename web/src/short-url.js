@@ -18,6 +18,8 @@ const imageCustomExpiration = document.getElementById('imageCustomExpiration');
 const imagePasswordProtected = document.getElementById('imagePasswordProtected');
 const imagePasswordField = document.getElementById('imagePasswordField');
 const imagePassword = document.getElementById('imagePassword');
+const imagePasswordVisibility = document.getElementById('imagePasswordVisibility');
+const imagePasswordVisibilityText = document.getElementById('imagePasswordVisibilityText');
 const createImageShareButton = document.getElementById('createImageShareBtn');
 const imageErrorText = document.getElementById('imageErrorText');
 const imageResultCard = document.getElementById('imageResultCard');
@@ -54,7 +56,8 @@ if ([
   form, urlInput, codeInput, submitButton, resultCard, resultUrl, resultTarget, errorText, copyButton, uiLangSelect,
   imageShareForm, imageFile, imageFileName, imageRetentionPreset, imageCustomExpirationField, imageCustomExpiration,
   imagePasswordProtected, imagePasswordField,
-  imagePassword, createImageShareButton, imageErrorText, imageResultCard, imageResultUrl, imageExpiresAt,
+  imagePassword, imagePasswordVisibility, imagePasswordVisibilityText,
+  createImageShareButton, imageErrorText, imageResultCard, imageResultUrl, imageExpiresAt,
   copyImageShareButton, ...Object.values(textElements)
 ].some((element) => !element)) {
   throw new Error('Short URL page is missing required DOM elements.');
@@ -80,10 +83,10 @@ const I18N = {
     resultTargetLabel: '\u76ee\u6a19',
     copyButton: '\u8907\u88fd\u9023\u7d50',
     copiedButton: '\u5df2\u8907\u88fd',
-    imageShareTitle: '\u5206\u4eab\u5716\u7247',
-    imageShareSubtitle: '\u4e0a\u50b3\u4e00\u6b21\uff0c\u7528\u4e00\u500b\u77ed\u9023\u7d50\u5206\u4eab\u3002',
-    imageFileLabel: '\u9078\u64c7\u5716\u7247',
-    imageLimitHint: '\u652f\u63f4 PNG\u3001JPEG\u3001GIF \u8207 WebP\uff0c\u5927\u5c0f\u4e0a\u9650 {max} MB\u3002',
+    imageShareTitle: '\u5206\u4eab\u5716\u7247\u6216\u5f71\u7247',
+    imageShareSubtitle: '\u4e0a\u50b3\u4e00\u6b21\uff0c\u7528\u4e00\u500b\u77ed\u9023\u7d50\u5206\u4eab\u5716\u7247\u6216\u5f71\u7247\u3002',
+    imageFileLabel: '\u9078\u64c7\u5716\u7247\u6216\u5f71\u7247',
+    imageLimitHint: '\u5716\u7247\u652f\u63f4 PNG\u3001JPEG\u3001GIF \u8207 WebP\uff08\u6700\u5927 {imageMax} MB\uff09\uff1b\u5f71\u7247\u652f\u63f4 MP4 \u8207 WebM\uff08\u6700\u5927 {videoMax} MB\u3001\u6700\u9577 {minutes} \u5206\u9418\uff09\u3002',
     imageRetentionLabel: '\u5230\u671f\u6642\u9593',
     imageRetentionHint: '\u9078\u64c7\u56fa\u5b9a\u6642\u9593\uff0c\u6216\u81ea\u8a02\u5230\u671f\u6642\u9593\uff08\u6700\u591a {days} \u5929\uff09\u3002',
     imageCustomExpirationLabel: '\u81ea\u8a02\u5230\u671f\u6642\u9593',
@@ -100,9 +103,11 @@ const I18N = {
     imagePasswordProtectedLabel: '\u4f7f\u7528\u5bc6\u78bc\u4fdd\u8b77',
     imagePasswordLabel: '\u5bc6\u78bc',
     imagePasswordHint: '\u9810\u8a2d\u70ba\u4eca\u5929\u7684\u56db\u4f4d\u6578\u5b57\uff08MMDD\uff09\uff0c\u4e5f\u53ef\u4ee5\u81ea\u884c\u4fee\u6539\u3002',
-    createImageShareButton: '\u5efa\u7acb\u5716\u7247\u9023\u7d50',
+    showPassword: '\u986f\u793a',
+    hidePassword: '\u96b1\u85cf',
+    createImageShareButton: '\u5efa\u7acb\u5a92\u9ad4\u9023\u7d50',
     creatingImageShareButton: '\u4e0a\u50b3\u4e2d...',
-    imageResultTitle: '\u4f60\u7684\u5716\u7247\u9023\u7d50',
+    imageResultTitle: '\u4f60\u7684\u5a92\u9ad4\u9023\u7d50',
     imageExpiresLabel: '\u5230\u671f\u6642\u9593',
     errorEnterUrl: '\u8acb\u8f38\u5165\u7db2\u5740\u3002',
     errorCreateFailed: '\u5efa\u7acb\u77ed\u7db2\u5740\u5931\u6557\u3002',
@@ -112,14 +117,21 @@ const I18N = {
     errorMissingUrl: '\u7f3a\u5c11\u7db2\u5740\u53c3\u6578\u3002',
     errorMethodNotAllowed: '\u4e0d\u652f\u63f4\u7684\u8acb\u6c42\u65b9\u5f0f\u3002',
     errorMissingShortUrl: '\u56de\u61c9\u7f3a\u5c11\u77ed\u7db2\u5740\u6b04\u4f4d\u3002',
-    errorSelectImage: '\u8acb\u9078\u64c7\u5716\u7247\u6a94\u6848\u3002',
+    errorSelectImage: '\u8acb\u9078\u64c7\u5716\u7247\u6216\u5f71\u7247\u6a94\u6848\u3002',
     errorImageTooLarge: '\u5716\u7247\u8d85\u904e\u5141\u8a31\u7684\u5927\u5c0f\u3002',
     errorUnsupportedImage: '\u50c5\u652f\u63f4 PNG\u3001JPEG\u3001GIF \u8207 WebP \u5716\u7247\u3002',
+    errorUnsupportedMedia: '\u50c5\u652f\u63f4 PNG\u3001JPEG\u3001GIF\u3001WebP\u3001MP4 \u8207 WebM \u6a94\u6848\u3002',
+    errorMediaTooLarge: '\u4e0a\u50b3\u6a94\u6848\u8d85\u904e\u5141\u8a31\u7684\u5927\u5c0f\u3002',
+    errorVideoTooLarge: '\u5f71\u7247\u8d85\u904e\u5141\u8a31\u7684\u5927\u5c0f\u3002',
+    errorVideoTooLong: '\u5f71\u7247\u9577\u5ea6\u4e0d\u53ef\u8d85\u904e {minutes} \u5206\u9418\u3002',
+    errorVideoMetadata: '\u7121\u6cd5\u8b80\u53d6\u5f71\u7247\u9577\u5ea6\uff0c\u8acb\u78ba\u8a8d\u6a94\u6848\u5b8c\u6574\u3002',
     errorRetentionTooLong: '\u4fdd\u5b58\u6642\u9593\u8d85\u904e\u5141\u8a31\u7bc4\u570d\u3002',
     errorInvalidCustomExpiration: '\u8acb\u9078\u64c7\u672a\u4f86 {days} \u5929\u5167\u7684\u5230\u671f\u6642\u9593\u3002',
     errorInvalidImagePassword: '\u5bc6\u78bc\u9700\u70ba 4\uff5e128 \u500b\u5b57\u5143\u3002',
-    errorImageSharingDisabled: '\u5716\u7247\u5206\u4eab\u529f\u80fd\u672a\u958b\u555f\u3002',
-    errorImageUploadFailed: '\u5716\u7247\u4e0a\u50b3\u5931\u6557\u3002'
+    errorImageSharingDisabled: '\u5a92\u9ad4\u5206\u4eab\u529f\u80fd\u672a\u958b\u555f\u3002',
+    errorImageUploadFailed: '\u5a92\u9ad4\u4e0a\u50b3\u5931\u6557\u3002',
+    errorMediaStorageFailed: '\u5a92\u9ad4\u6a94\u6848\u5132\u5b58\u5931\u6557\uff0c\u8acb\u78ba\u8a8d\u4f3a\u670d\u5668\u7684\u5132\u5b58\u8def\u5f91\u8207\u5beb\u5165\u6b0a\u9650\u3002',
+    errorMediaPersistenceFailed: '\u5a92\u9ad4\u5206\u4eab\u7d00\u9304\u5132\u5b58\u5931\u6557\uff0c\u8acb\u78ba\u8a8d\u8cc7\u6599\u5eab\u9023\u7dda\u8207\u6b0a\u9650\u3002'
   },
   en: {
     pageTitle: 'Short URL',
@@ -138,10 +150,10 @@ const I18N = {
     resultTargetLabel: 'Destination',
     copyButton: 'Copy link',
     copiedButton: 'Copied',
-    imageShareTitle: 'Share an image',
-    imageShareSubtitle: 'Upload once and share with a clean short link.',
-    imageFileLabel: 'Choose an image',
-    imageLimitHint: 'PNG, JPEG, GIF, and WebP up to {max} MB.',
+    imageShareTitle: 'Share an image or video',
+    imageShareSubtitle: 'Upload an image or video once and share it with a clean short link.',
+    imageFileLabel: 'Choose an image or video',
+    imageLimitHint: 'PNG, JPEG, GIF, and WebP up to {imageMax} MB; MP4 and WebM up to {videoMax} MB and {minutes} minutes.',
     imageRetentionLabel: 'Expiration',
     imageRetentionHint: 'Choose a preset or a custom expiration (up to {days} days).',
     imageCustomExpirationLabel: 'Custom expiration',
@@ -158,9 +170,11 @@ const I18N = {
     imagePasswordProtectedLabel: 'Protect with password',
     imagePasswordLabel: 'Password',
     imagePasswordHint: 'Defaults to today\'s four digits (MMDD); you can change it.',
-    createImageShareButton: 'Create image link',
+    showPassword: 'Show',
+    hidePassword: 'Hide',
+    createImageShareButton: 'Create media link',
     creatingImageShareButton: 'Uploading...',
-    imageResultTitle: 'Your image link',
+    imageResultTitle: 'Your media link',
     imageExpiresLabel: 'Expires',
     errorEnterUrl: 'Please enter a URL.',
     errorCreateFailed: 'Failed to create short URL.',
@@ -170,14 +184,21 @@ const I18N = {
     errorMissingUrl: 'Missing URL parameter.',
     errorMethodNotAllowed: 'Method not allowed.',
     errorMissingShortUrl: 'Response missing short URL field.',
-    errorSelectImage: 'Select an image file.',
+    errorSelectImage: 'Select an image or video file.',
     errorImageTooLarge: 'The image exceeds the allowed size.',
     errorUnsupportedImage: 'Only PNG, JPEG, GIF, and WebP images are supported.',
+    errorUnsupportedMedia: 'Only PNG, JPEG, GIF, WebP, MP4, and WebM files are supported.',
+    errorMediaTooLarge: 'The uploaded file exceeds the allowed size.',
+    errorVideoTooLarge: 'The video exceeds the allowed size.',
+    errorVideoTooLong: 'The video must not exceed {minutes} minutes.',
+    errorVideoMetadata: 'The video duration could not be read. Check that the file is valid.',
     errorRetentionTooLong: 'Retention is outside the allowed range.',
     errorInvalidCustomExpiration: 'Choose an expiration within the next {days} days.',
     errorInvalidImagePassword: 'Password must contain 4 to 128 characters.',
-    errorImageSharingDisabled: 'Image sharing is disabled.',
-    errorImageUploadFailed: 'Image upload failed.'
+    errorImageSharingDisabled: 'Media sharing is disabled.',
+    errorImageUploadFailed: 'Media upload failed.',
+    errorMediaStorageFailed: 'The media file could not be stored. Check the server storage path and write permission.',
+    errorMediaPersistenceFailed: 'The media share record could not be saved. Check the database connection and permission.'
   }
 };
 
@@ -187,7 +208,10 @@ let imageShareConfig = {
   defaultRetentionHours: 1,
   maxRetentionDays: 365,
   maxFileSizeBytes: 20 * 1024 * 1024,
-  maxFileSizeMb: 20
+  maxFileSizeMb: 20,
+  maxVideoFileSizeBytes: 100 * 1024 * 1024,
+  maxVideoFileSizeMb: 100,
+  maxVideoDurationSeconds: 5 * 60
 };
 
 const t = (key) => I18N[currentLang]?.[key] ?? I18N[DEFAULT_LANG][key] ?? key;
@@ -244,13 +268,59 @@ const imageErrorFromPayload = (payload) => {
   const errors = {
     IMAGE_REQUIRED: 'errorSelectImage',
     IMAGE_TOO_LARGE: 'errorImageTooLarge',
+    VIDEO_TOO_LARGE: 'errorVideoTooLarge',
+    VIDEO_TOO_LONG: 'errorVideoTooLong',
+    MEDIA_TOO_LARGE: 'errorMediaTooLarge',
     UNSUPPORTED_IMAGE: 'errorUnsupportedImage',
+    UNSUPPORTED_MEDIA: 'errorUnsupportedMedia',
     RETENTION_TOO_LONG: 'errorRetentionTooLong',
     INVALID_PASSWORD: 'errorInvalidImagePassword',
-    IMAGE_SHARING_DISABLED: 'errorImageSharingDisabled'
+    IMAGE_SHARING_DISABLED: 'errorImageSharingDisabled',
+    MEDIA_STORAGE_FAILED: 'errorMediaStorageFailed',
+    MEDIA_PERSISTENCE_FAILED: 'errorMediaPersistenceFailed'
   };
+  if (code === 'VIDEO_TOO_LONG') {
+    return format(t('errorVideoTooLong'), { minutes: maxVideoDurationMinutes() });
+  }
   return errors[code] ? t(errors[code]) : String(payload?.error || '').trim() || t('errorImageUploadFailed');
 };
+
+const maxVideoDurationMinutes = () => Math.max(
+  1,
+  Math.ceil(Number(imageShareConfig.maxVideoDurationSeconds || 5 * 60) / 60)
+);
+
+const isVideoFile = (file) => Boolean(file) && (
+  String(file.type || '').toLowerCase().startsWith('video/')
+  || /\.(?:mp4|webm)$/i.test(String(file.name || ''))
+);
+
+const readVideoDurationSeconds = (file) => new Promise((resolve, reject) => {
+  const video = document.createElement('video');
+  const objectUrl = URL.createObjectURL(file);
+  let settled = false;
+  let timeout = null;
+  const finish = (error, duration) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    video.onloadedmetadata = null;
+    video.onerror = null;
+    video.removeAttribute('src');
+    video.load();
+    URL.revokeObjectURL(objectUrl);
+    if (error) reject(error);
+    else resolve(duration);
+  };
+  timeout = setTimeout(() => finish(new Error('Video metadata timed out.')), 10_000);
+  video.preload = 'metadata';
+  video.onloadedmetadata = () => {
+    const duration = Number(video.duration);
+    finish(Number.isFinite(duration) && duration > 0 ? null : new Error('Invalid video duration.'), duration);
+  };
+  video.onerror = () => finish(new Error('Unable to read video metadata.'));
+  video.src = objectUrl;
+});
 
 const toLocalDateTimeValue = (timestamp) => {
   const date = new Date(timestamp);
@@ -265,6 +335,27 @@ const syncExpirationMode = () => {
     const defaultMillis = Math.max(1, Number(imageShareConfig.defaultRetentionHours || 1)) * 60 * 60 * 1000;
     imageCustomExpiration.value = toLocalDateTimeValue(Date.now() + defaultMillis);
   }
+};
+
+const syncPasswordProtection = () => {
+  const protectedImage = imagePasswordProtected.checked;
+  imagePasswordField.classList.toggle('is-disabled', !protectedImage);
+  imagePassword.disabled = !protectedImage;
+  imagePasswordVisibility.disabled = !protectedImage;
+  imagePassword.required = protectedImage;
+  if (!protectedImage) {
+    imagePassword.type = 'password';
+  }
+  if (protectedImage && !imagePassword.value.trim()) {
+    imagePassword.value = defaultImagePassword();
+  }
+  syncPasswordVisibility();
+};
+
+const syncPasswordVisibility = () => {
+  const visible = imagePassword.type === 'text';
+  imagePasswordVisibility.setAttribute('aria-pressed', String(visible));
+  imagePasswordVisibilityText.textContent = t(visible ? 'hidePassword' : 'showPassword');
 };
 
 const applyImageConstraints = (resetRetention = false) => {
@@ -285,7 +376,9 @@ const applyImageConstraints = (resetRetention = false) => {
       : '';
   }
   textElements.imageLimitHint.textContent = format(t('imageLimitHint'), {
-    max: Math.max(1, Number(imageShareConfig.maxFileSizeMb || 20))
+    imageMax: Math.max(1, Number(imageShareConfig.maxFileSizeMb || 20)),
+    videoMax: Math.max(1, Number(imageShareConfig.maxVideoFileSizeMb || 100)),
+    minutes: maxVideoDurationMinutes()
   });
   textElements.imageRetentionHint.textContent = format(t('imageRetentionHint'), {
     days: maxRetentionDays
@@ -321,6 +414,7 @@ const applyLanguage = (lang) => {
   setButtonLoading(submitButton, submitButton.dataset.loading === 'true', 'createButton', 'creatingButton');
   copyButton.textContent = t('copyButton');
   copyImageShareButton.textContent = t('copyButton');
+  syncPasswordVisibility();
   applyImageConstraints();
 };
 
@@ -370,23 +464,38 @@ imageFile.addEventListener('change', () => {
   imageFileName.textContent = imageFile.files?.[0]?.name || '';
 });
 
-imagePasswordProtected.addEventListener('change', () => {
-  const protectedImage = imagePasswordProtected.checked;
-  imagePasswordField.classList.toggle('hidden', !protectedImage);
-  imagePassword.required = protectedImage;
-  if (protectedImage && !imagePassword.value.trim()) {
-    imagePassword.value = defaultImagePassword();
-  }
+imagePasswordProtected.addEventListener('change', syncPasswordProtection);
+imagePasswordVisibility.addEventListener('click', () => {
+  if (imagePasswordVisibility.disabled) return;
+  imagePassword.type = imagePassword.type === 'password' ? 'text' : 'password';
+  syncPasswordVisibility();
+  imagePassword.focus();
 });
 
 imageShareForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const selectedImage = imageFile.files?.[0];
-  if (!selectedImage) {
+  const selectedMedia = imageFile.files?.[0];
+  if (!selectedMedia) {
     setError(imageErrorText, t('errorSelectImage'));
     return;
   }
-  if (selectedImage.size > Number(imageShareConfig.maxFileSizeBytes || 20 * 1024 * 1024)) {
+  const selectedVideo = isVideoFile(selectedMedia);
+  if (selectedVideo) {
+    if (selectedMedia.size > Number(imageShareConfig.maxVideoFileSizeBytes || 100 * 1024 * 1024)) {
+      setError(imageErrorText, t('errorVideoTooLarge'));
+      return;
+    }
+    try {
+      const duration = await readVideoDurationSeconds(selectedMedia);
+      if (duration > Number(imageShareConfig.maxVideoDurationSeconds || 5 * 60)) {
+        setError(imageErrorText, format(t('errorVideoTooLong'), { minutes: maxVideoDurationMinutes() }));
+        return;
+      }
+    } catch {
+      setError(imageErrorText, t('errorVideoMetadata'));
+      return;
+    }
+  } else if (selectedMedia.size > Number(imageShareConfig.maxFileSizeBytes || 20 * 1024 * 1024)) {
     setError(imageErrorText, t('errorImageTooLarge'));
     return;
   }
@@ -417,7 +526,7 @@ imageShareForm.addEventListener('submit', async (event) => {
   setButtonLoading(createImageShareButton, true, 'createImageShareButton', 'creatingImageShareButton', imageShareConfig.enabled);
   try {
     const formData = new FormData();
-    formData.append('image', selectedImage);
+    formData.append('image', selectedMedia);
     if (customExpiration) {
       formData.append('expiresAt', String(expiresAt));
     } else {
@@ -455,6 +564,7 @@ copyImageShareButton.addEventListener('click', () => copyText(imageResultUrl.tex
 uiLangSelect.addEventListener('change', () => applyLanguage(uiLangSelect.value));
 imageRetentionPreset.addEventListener('change', syncExpirationMode);
 
+syncPasswordProtection();
 applyLanguage(localStorage.getItem(LANG_STORAGE_KEY) || DEFAULT_LANG);
 fetch('/api/short/image/config')
   .then((response) => (response.ok ? response.json() : null))

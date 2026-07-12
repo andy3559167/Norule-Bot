@@ -208,7 +208,7 @@ public final class ShortUrlService {
         ImageShareService.UploadResult result = imageShareService.create(upload);
         if (result.isSuccess()) {
             ImageShare imageShare = result.imageShare();
-            publishAccess(ShortUrlAccessEvent.Action.CREATED, ShortUrlAccessEvent.ResourceType.IMAGE,
+            publishAccess(ShortUrlAccessEvent.Action.CREATED, mediaResourceType(imageShare),
                     imageShare.code(), imageShare.contentType(), imageShare.viewCount(), imageShare.expiresAt(),
                     imageShare.isPasswordProtected(), "", "");
         }
@@ -217,6 +217,10 @@ public final class ShortUrlService {
 
     public ImageShare resolveImageShare(String code) {
         return imageShareService == null ? null : imageShareService.resolve(code);
+    }
+
+    public ImageShare findExpiredImageShare(String code) {
+        return imageShareService == null ? null : imageShareService.findExpired(code);
     }
 
     public java.io.InputStream openImageShare(ImageShare imageShare) {
@@ -243,10 +247,16 @@ public final class ShortUrlService {
             return null;
         }
         ImageShare viewed = imageShareService.recordView(imageShare);
-        publishAccess(ShortUrlAccessEvent.Action.VIEWED, ShortUrlAccessEvent.ResourceType.IMAGE,
+        publishAccess(ShortUrlAccessEvent.Action.VIEWED, mediaResourceType(viewed),
                 viewed.code(), viewed.contentType(), viewed.viewCount(), viewed.expiresAt(),
                 viewed.isPasswordProtected(), clientAddress, userAgent);
         return viewed;
+    }
+
+    private ShortUrlAccessEvent.ResourceType mediaResourceType(ImageShare imageShare) {
+        return imageShare != null && imageShare.isVideo()
+                ? ShortUrlAccessEvent.ResourceType.VIDEO
+                : ShortUrlAccessEvent.ResourceType.IMAGE;
     }
 
     public Long getLogChannelId() {

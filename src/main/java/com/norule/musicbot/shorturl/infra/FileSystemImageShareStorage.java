@@ -41,7 +41,8 @@ public final class FileSystemImageShareStorage implements ImageShareStorage {
     }
 
     private Path resolve(ImageShare imageShare) {
-        if (imageShare == null || imageShare.storageName() == null || !imageShare.storageName().matches("[A-Za-z0-9_-]{1,96}\\.(?:png|jpg|gif|webp)")) {
+        if (imageShare == null || imageShare.storageName() == null
+                || !imageShare.storageName().matches("[A-Za-z0-9_-]{1,96}\\.(?:png|jpg|gif|webp|mp4|webm)")) {
             throw new IllegalArgumentException("Invalid image-share storage name");
         }
         Path resolved = storageDirectory.resolve(imageShare.storageName()).normalize();

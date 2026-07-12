@@ -40,17 +40,26 @@ public final class ShortUrlConfig {
         private final int defaultRetentionHours;
         private final int maxRetentionDays;
         private final int maxFileSizeMb;
+        private final int maxVideoFileSizeMb;
+        private final int maxVideoDurationSeconds;
+        private final int expiredShareRetentionDays;
         private final String storagePath;
 
         public Image(boolean enabled,
                      int defaultRetentionHours,
                      int maxRetentionDays,
                      int maxFileSizeMb,
+                     int maxVideoFileSizeMb,
+                     int maxVideoDurationSeconds,
+                     int expiredShareRetentionDays,
                      String storagePath) {
             this.enabled = enabled;
             this.maxRetentionDays = Math.max(1, Math.min(365, maxRetentionDays));
             this.defaultRetentionHours = Math.max(1, Math.min(this.maxRetentionDays * 24, defaultRetentionHours));
             this.maxFileSizeMb = Math.max(1, Math.min(20, maxFileSizeMb));
+            this.maxVideoFileSizeMb = Math.max(1, Math.min(100, maxVideoFileSizeMb));
+            this.maxVideoDurationSeconds = Math.max(1, Math.min(5 * 60, maxVideoDurationSeconds));
+            this.expiredShareRetentionDays = Math.max(1, Math.min(365, expiredShareRetentionDays));
             this.storagePath = storagePath == null || storagePath.isBlank()
                     ? "data/short-url-images"
                     : storagePath.trim();
@@ -60,6 +69,9 @@ public final class ShortUrlConfig {
         public int getDefaultRetentionHours() { return defaultRetentionHours; }
         public int getMaxRetentionDays() { return maxRetentionDays; }
         public int getMaxFileSizeMb() { return maxFileSizeMb; }
+        public int getMaxVideoFileSizeMb() { return maxVideoFileSizeMb; }
+        public int getMaxVideoDurationSeconds() { return maxVideoDurationSeconds; }
+        public int getExpiredShareRetentionDays() { return expiredShareRetentionDays; }
         public String getStoragePath() { return storagePath; }
     }
 
@@ -90,7 +102,8 @@ public final class ShortUrlConfig {
                           Mysql mysql,
                           Sqlite sqlite) {
         this(enabled, bindHost, bindPort, publicBaseUrl, codeLength, allowPrivateTargets, storage, dedupe,
-                ttlDays, cleanupIntervalMinutes, new Image(true, 1, 365, 20, "data/short-url-images"), mysql, sqlite);
+                ttlDays, cleanupIntervalMinutes,
+                new Image(true, 1, 365, 20, 100, 5 * 60, 30, "data/short-url-images"), mysql, sqlite);
     }
 
     public ShortUrlConfig(boolean enabled,
@@ -121,7 +134,9 @@ public final class ShortUrlConfig {
         this.dedupe = dedupe;
         this.ttlDays = Math.max(1, ttlDays);
         this.cleanupIntervalMinutes = Math.max(1, cleanupIntervalMinutes);
-        this.image = image == null ? new Image(true, 1, 365, 20, "data/short-url-images") : image;
+        this.image = image == null
+                ? new Image(true, 1, 365, 20, 100, 5 * 60, 30, "data/short-url-images")
+                : image;
         this.mysql = mysql == null ? new Mysql("", "", "", 8) : mysql;
         this.sqlite = sqlite == null ? new Sqlite("data/norule.db") : sqlite;
     }
@@ -143,6 +158,9 @@ public final class ShortUrlConfig {
                 source.getImage().getDefaultRetentionHours(),
                 source.getImage().getMaxRetentionDays(),
                 source.getImage().getMaxFileSizeMb(),
+                source.getImage().getMaxVideoFileSizeMb(),
+                source.getImage().getMaxVideoDurationSeconds(),
+                source.getImage().getExpiredShareRetentionDays(),
                 source.getImage().getStoragePath()
         );
         this.mysql = new Mysql(
@@ -171,6 +189,9 @@ public final class ShortUrlConfig {
                 image.getDefaultRetentionHours() * 60L * 60L * 1000L,
                 image.getMaxRetentionDays() * 24L * 60L * 60L * 1000L,
                 image.getMaxFileSizeMb() * 1024L * 1024L,
+                image.getMaxVideoFileSizeMb() * 1024L * 1024L,
+                image.getMaxVideoDurationSeconds() * 1000L,
+                image.getExpiredShareRetentionDays() * 24L * 60L * 60L * 1000L,
                 cleanupIntervalMinutes * 60L * 1000L,
                 codeLength
         );

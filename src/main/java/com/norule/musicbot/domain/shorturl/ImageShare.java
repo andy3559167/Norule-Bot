@@ -26,6 +26,10 @@ public record ImageShare(
         return passwordHash != null && !passwordHash.isBlank();
     }
 
+    public boolean isVideo() {
+        return contentType != null && contentType.startsWith("video/");
+    }
+
     public ImageShare withViewCount(long updatedViewCount) {
         return new ImageShare(code, storageName, contentType, sizeBytes, createdAt, expiresAt,
                 passwordHash, contentHash, Math.max(0L, updatedViewCount));

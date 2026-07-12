@@ -40,15 +40,17 @@ public final class DiscordShortUrlAccessPublisher implements ShortUrlAccessPubli
     private EmbedBuilder buildEmbed(ShortUrlAccessEvent event) {
         boolean viewed = event.action() == ShortUrlAccessEvent.Action.VIEWED;
         boolean image = event.resourceType() == ShortUrlAccessEvent.ResourceType.IMAGE;
+        boolean video = event.resourceType() == ShortUrlAccessEvent.ResourceType.VIDEO;
+        String resourceName = video ? "影片短網址" : image ? "圖片短網址" : "短網址";
         EmbedBuilder embed = new EmbedBuilder()
                 .setColor(viewed ? new Color(52, 152, 219) : new Color(46, 204, 113))
-                .setTitle((image ? "圖片短網址" : "短網址") + (viewed ? "瀏覽日誌" : "建立日誌"))
+                .setTitle(resourceName + (viewed ? "瀏覽日誌" : "建立日誌"))
                 .addField("短網址", event.publicUrl(), false)
                 .addField("代碼", '`' + safe(event.code(), 128) + '`', true)
                 .addField("累計瀏覽", '`' + String.valueOf(event.viewCount()) + '`', true)
                 .addField("到期時間", "<t:" + event.expiresAt() / 1000L + ":F>", false)
                 .setTimestamp(Instant.ofEpochMilli(event.occurredAt()));
-        if (image) {
+        if (image || video) {
             embed.addField("存取方式", event.passwordProtected() ? "密碼保護" : "公開", true)
                     .addField("內容類型", '`' + safe(event.target(), 128) + '`', true);
         } else {

@@ -10,7 +10,7 @@ const copyServerTemplates = () => ({
   name: 'copy-server-templates',
   closeBundle() {
     mkdirSync(webOutputDir, { recursive: true });
-    for (const fileName of ['short-url.html', 'image-view.html', 'image-password.html']) {
+    for (const fileName of ['short-url.html', 'image-view.html', 'image-password.html', 'share-expired.html']) {
       copyFileSync(path.resolve(serverTemplateDir, fileName), path.resolve(webOutputDir, fileName));
     }
   }

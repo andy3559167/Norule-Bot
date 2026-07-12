@@ -2228,22 +2228,35 @@ public String getToken() {
         public static final class Image {
             private static final int MAX_RETENTION_DAYS = 365;
             private static final int MAX_FILE_SIZE_MB = 20;
+            private static final int MAX_VIDEO_FILE_SIZE_MB = 100;
+            private static final int MAX_VIDEO_DURATION_SECONDS = 5 * 60;
+            private static final int DEFAULT_EXPIRED_SHARE_RETENTION_DAYS = 30;
 
             private final boolean enabled;
             private final int defaultRetentionHours;
             private final int maxRetentionDays;
             private final int maxFileSizeMb;
+            private final int maxVideoFileSizeMb;
+            private final int maxVideoDurationSeconds;
+            private final int expiredShareRetentionDays;
             private final String storagePath;
 
             private Image(boolean enabled,
                           int defaultRetentionHours,
                           int maxRetentionDays,
                           int maxFileSizeMb,
+                          int maxVideoFileSizeMb,
+                          int maxVideoDurationSeconds,
+                          int expiredShareRetentionDays,
                           String storagePath) {
                 this.enabled = enabled;
                 this.maxRetentionDays = Math.max(1, Math.min(MAX_RETENTION_DAYS, maxRetentionDays));
                 this.defaultRetentionHours = Math.max(1, Math.min(this.maxRetentionDays * 24, defaultRetentionHours));
                 this.maxFileSizeMb = Math.max(1, Math.min(MAX_FILE_SIZE_MB, maxFileSizeMb));
+                this.maxVideoFileSizeMb = Math.max(1, Math.min(MAX_VIDEO_FILE_SIZE_MB, maxVideoFileSizeMb));
+                this.maxVideoDurationSeconds = Math.max(1, Math.min(MAX_VIDEO_DURATION_SECONDS, maxVideoDurationSeconds));
+                this.expiredShareRetentionDays = Math.max(1,
+                        Math.min(MAX_RETENTION_DAYS, expiredShareRetentionDays));
                 this.storagePath = storagePath == null || storagePath.isBlank()
                         ? "data/short-url-images"
                         : storagePath.trim();
@@ -2256,12 +2269,17 @@ public String getToken() {
                         getInt(map, "defaultRetentionHours", defaults.getDefaultRetentionHours()),
                         getInt(map, "maxRetentionDays", defaults.getMaxRetentionDays()),
                         getInt(map, "maxFileSizeMb", defaults.getMaxFileSizeMb()),
+                        getInt(map, "maxVideoFileSizeMb", defaults.getMaxVideoFileSizeMb()),
+                        getInt(map, "maxVideoDurationSeconds", defaults.getMaxVideoDurationSeconds()),
+                        getInt(map, "expiredShareRetentionDays", defaults.getExpiredShareRetentionDays()),
                         getString(map, "storagePath", defaults.getStoragePath())
                 );
             }
 
             private static Image defaultValues() {
-                return new Image(true, 1, MAX_RETENTION_DAYS, MAX_FILE_SIZE_MB, "data/short-url-images");
+                return new Image(true, 1, MAX_RETENTION_DAYS, MAX_FILE_SIZE_MB,
+                        MAX_VIDEO_FILE_SIZE_MB, MAX_VIDEO_DURATION_SECONDS, DEFAULT_EXPIRED_SHARE_RETENTION_DAYS,
+                        "data/short-url-images");
             }
 
             public boolean isEnabled() {
@@ -2278,6 +2296,18 @@ public String getToken() {
 
             public int getMaxFileSizeMb() {
                 return maxFileSizeMb;
+            }
+
+            public int getMaxVideoFileSizeMb() {
+                return maxVideoFileSizeMb;
+            }
+
+            public int getMaxVideoDurationSeconds() {
+                return maxVideoDurationSeconds;
+            }
+
+            public int getExpiredShareRetentionDays() {
+                return expiredShareRetentionDays;
             }
 
             public String getStoragePath() {
