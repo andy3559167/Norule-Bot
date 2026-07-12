@@ -812,6 +812,24 @@ public class MusicPlayerService {
                 + " rootCause=" + root);
     }
 
+    private String rootCauseDetails(Throwable exception) {
+        if (exception == null) {
+            return "-";
+        }
+        String root = exception.getClass().getSimpleName() + ": " + safeExceptionMessage(exception);
+        Throwable cause = exception.getCause();
+        while (cause != null) {
+            root = cause.getClass().getSimpleName() + ": " + safeExceptionMessage(cause);
+            cause = cause.getCause();
+        }
+        return root;
+    }
+
+    private String safeExceptionMessage(Throwable exception) {
+        String message = exception == null ? null : exception.getMessage();
+        return message == null || message.isBlank() ? "-" : message.trim();
+    }
+
     private boolean isSpotifyRateLimited(FriendlyException exception) {
         Throwable current = exception;
         while (current != null) {
@@ -1252,11 +1270,19 @@ public class MusicPlayerService {
 
     private void handleTrackException(long guildId, AudioTrack track, Throwable exception) {
         String msg = exception == null || exception.getMessage() == null ? "-" : exception.getMessage().trim();
+        String trackIdentifier = track == null ? "-" : track.getIdentifier();
+        String trackTitle = track == null || track.getInfo() == null || track.getInfo().title == null
+                ? "-"
+                : track.getInfo().title;
+        System.out.println("[NoRule] Playback failed: guildId=" + guildId
+                + " identifier=" + trackIdentifier
+                + " title=" + trackTitle
+                + " message=" + msg
+                + " rootCause=" + rootCauseDetails(exception));
         setAutoplayNotice(guildId, "LOAD_FAILED:" + msg);
         BiConsumer<Long, PlaybackFailure> listener = playbackFailureListener;
         if (listener != null) {
-            String title = track == null || track.getInfo() == null || track.getInfo().title == null ? "-" : track.getInfo().title;
-            listener.accept(guildId, new PlaybackFailure(title, msg));
+            listener.accept(guildId, new PlaybackFailure(trackTitle, msg));
         }
     }
 

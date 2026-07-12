@@ -35,6 +35,7 @@ import java.util.regex.Pattern;
 public final class ShortUrlGatewayServer {
     private static final long MULTIPART_OVERHEAD_BYTES = 128L * 1024L;
     private static final long IMAGE_ACCESS_DURATION_MILLIS = 60L * 60L * 1000L;
+    private static final long VIEW_DEDUPLICATION_MILLIS = 60L * 1000L;
     private static final String IMAGE_ACCESS_COOKIE = "nr_image_access";
     private static final SecureRandom IMAGE_ACCESS_RANDOM = new SecureRandom();
     private static final DateTimeFormatter IMAGE_DATE_FORMAT = DateTimeFormatter
@@ -49,6 +50,7 @@ public final class ShortUrlGatewayServer {
     private final ShortUrlService shortUrlService;
     private final Supplier<BotConfig.ShortUrl> configSupplier;
     private final Map<String, ImageAccessGrant> imageAccessGrants = new ConcurrentHashMap<>();
+    private final Map<String, Long> recentViewers = new ConcurrentHashMap<>();
     private volatile HttpServer server;
     private volatile String bindHost = "";
     private volatile int bindPort = -1;
@@ -159,7 +161,10 @@ public final class ShortUrlGatewayServer {
             return;
         }
         if ("GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            shortUrlService.recordView(entry, clientAddress(exchange), userAgent(exchange));
+            String address = clientAddress(exchange);
+            if (shouldRecordView("url", code, address)) {
+                shortUrlService.recordView(entry, address, userAgent(exchange));
+            }
         }
         exchange.getResponseHeaders().set("Location", entry.target());
         exchange.sendResponseHeaders(302, -1);
@@ -292,7 +297,9 @@ public final class ShortUrlGatewayServer {
                             form.value("password"),
                             expiration.retentionMillis(),
                             expiration.expiresAtMillis()
-                    )
+                    ),
+                    clientAddress(exchange),
+                    userAgent(exchange)
             );
             if (!result.isSuccess()) {
                 sendImageUploadFailure(exchange, result.error());
@@ -325,13 +332,16 @@ public final class ShortUrlGatewayServer {
         }
         ImageShare viewed = imageShare;
         if ("GET".equalsIgnoreCase(method)) {
-            ImageShare recorded = shortUrlService.recordImageShareView(
-                    imageShare,
-                    clientAddress(exchange),
-                    userAgent(exchange)
-            );
-            if (recorded != null) {
-                viewed = recorded;
+            String address = clientAddress(exchange);
+            if (shouldRecordView("media", imageShare.code(), address)) {
+                ImageShare recorded = shortUrlService.recordImageShareView(
+                        imageShare,
+                        address,
+                        userAgent(exchange)
+                );
+                if (recorded != null) {
+                    viewed = recorded;
+                }
             }
         }
         sendHtml(exchange, 200, buildImageViewPage(viewed));
@@ -468,6 +478,26 @@ public final class ShortUrlGatewayServer {
     private void cleanupImageAccessGrants() {
         long now = System.currentTimeMillis();
         imageAccessGrants.entrySet().removeIf(entry -> entry.getValue().expiresAt() <= now);
+    }
+
+    private boolean shouldRecordView(String resourceType, String code, String clientAddress) {
+        long now = System.currentTimeMillis();
+        if (recentViewers.size() > 1024) {
+            recentViewers.entrySet().removeIf(entry -> entry.getValue() + VIEW_DEDUPLICATION_MILLIS <= now);
+        }
+        String key = resourceType + ":" + code + ":" + clientAddress;
+        while (true) {
+            Long previous = recentViewers.putIfAbsent(key, now);
+            if (previous == null) {
+                return true;
+            }
+            if (now - previous < VIEW_DEDUPLICATION_MILLIS) {
+                return false;
+            }
+            if (recentViewers.replace(key, previous, now)) {
+                return true;
+            }
+        }
     }
 
     private String readCookie(HttpExchange exchange, String name) {

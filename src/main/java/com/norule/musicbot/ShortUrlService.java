@@ -202,6 +202,12 @@ public final class ShortUrlService {
     }
 
     public ImageShareService.UploadResult createImageShare(ImageShareService.Upload upload) {
+        return createImageShare(upload, "", "");
+    }
+
+    public ImageShareService.UploadResult createImageShare(ImageShareService.Upload upload,
+                                                            String clientAddress,
+                                                            String userAgent) {
         if (imageShareService == null) {
             return new ImageShareService.UploadResult(null, ImageShareService.UploadError.DISABLED);
         }
@@ -210,7 +216,7 @@ public final class ShortUrlService {
             ImageShare imageShare = result.imageShare();
             publishAccess(ShortUrlAccessEvent.Action.CREATED, mediaResourceType(imageShare),
                     imageShare.code(), imageShare.contentType(), imageShare.viewCount(), imageShare.expiresAt(),
-                    imageShare.isPasswordProtected(), "", "");
+                    imageShare.isPasswordProtected(), clientAddress, userAgent);
         }
         return result;
     }

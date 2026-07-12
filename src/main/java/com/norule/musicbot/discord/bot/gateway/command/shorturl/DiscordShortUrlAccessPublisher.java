@@ -56,9 +56,12 @@ public final class DiscordShortUrlAccessPublisher implements ShortUrlAccessPubli
         } else {
             embed.addField("目標網址", safe(event.target(), 1000), false);
         }
-        if (viewed) {
-            embed.addField("來源 IP", '`' + safe(event.clientAddress(), 128) + '`', true)
-                    .addField("User-Agent", '`' + safe(event.userAgent(), 900) + '`', false);
+        String clientAddress = event.clientAddress() == null ? "" : event.clientAddress();
+        if (!clientAddress.isBlank()) {
+            embed.addField("來源 IP", '`' + safe(clientAddress, 128) + '`', true);
+            if (viewed) {
+                embed.addField("User-Agent", '`' + safe(event.userAgent(), 900) + '`', false);
+            }
         }
         return embed;
     }

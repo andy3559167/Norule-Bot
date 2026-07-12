@@ -131,7 +131,8 @@ const I18N = {
     errorImageSharingDisabled: '\u5a92\u9ad4\u5206\u4eab\u529f\u80fd\u672a\u958b\u555f\u3002',
     errorImageUploadFailed: '\u5a92\u9ad4\u4e0a\u50b3\u5931\u6557\u3002',
     errorMediaStorageFailed: '\u5a92\u9ad4\u6a94\u6848\u5132\u5b58\u5931\u6557\uff0c\u8acb\u78ba\u8a8d\u4f3a\u670d\u5668\u7684\u5132\u5b58\u8def\u5f91\u8207\u5beb\u5165\u6b0a\u9650\u3002',
-    errorMediaPersistenceFailed: '\u5a92\u9ad4\u5206\u4eab\u7d00\u9304\u5132\u5b58\u5931\u6557\uff0c\u8acb\u78ba\u8a8d\u8cc7\u6599\u5eab\u9023\u7dda\u8207\u6b0a\u9650\u3002'
+    errorMediaPersistenceFailed: '\u5a92\u9ad4\u5206\u4eab\u7d00\u9304\u5132\u5b58\u5931\u6557\uff0c\u8acb\u78ba\u8a8d\u8cc7\u6599\u5eab\u9023\u7dda\u8207\u6b0a\u9650\u3002',
+    errorMediaGatewayFailed: '\u4e0a\u50b3\u8acb\u6c42\u88ab\u4e0a\u6e38\u7db2\u95dc\u62d2\u7d55\uff08HTTP {status}\uff09\uff0c\u8acb\u6aa2\u67e5\u7db2\u95dc\u4e0a\u50b3\u5927\u5c0f\u9650\u5236\u3002'
   },
   en: {
     pageTitle: 'Short URL',
@@ -198,7 +199,8 @@ const I18N = {
     errorImageSharingDisabled: 'Media sharing is disabled.',
     errorImageUploadFailed: 'Media upload failed.',
     errorMediaStorageFailed: 'The media file could not be stored. Check the server storage path and write permission.',
-    errorMediaPersistenceFailed: 'The media share record could not be saved. Check the database connection and permission.'
+    errorMediaPersistenceFailed: 'The media share record could not be saved. Check the database connection and permission.',
+    errorMediaGatewayFailed: 'The upload was rejected by the upstream gateway (HTTP {status}). Check its request size limit.'
   }
 };
 
@@ -277,10 +279,14 @@ const imageErrorFromPayload = (payload) => {
     INVALID_PASSWORD: 'errorInvalidImagePassword',
     IMAGE_SHARING_DISABLED: 'errorImageSharingDisabled',
     MEDIA_STORAGE_FAILED: 'errorMediaStorageFailed',
-    MEDIA_PERSISTENCE_FAILED: 'errorMediaPersistenceFailed'
+    MEDIA_PERSISTENCE_FAILED: 'errorMediaPersistenceFailed',
+    MEDIA_GATEWAY_FAILED: 'errorMediaGatewayFailed'
   };
   if (code === 'VIDEO_TOO_LONG') {
     return format(t('errorVideoTooLong'), { minutes: maxVideoDurationMinutes() });
+  }
+  if (code === 'MEDIA_GATEWAY_FAILED') {
+    return format(t('errorMediaGatewayFailed'), { status: payload?.status || '5xx' });
   }
   return errors[code] ? t(errors[code]) : String(payload?.error || '').trim() || t('errorImageUploadFailed');
 };
@@ -535,8 +541,19 @@ imageShareForm.addEventListener('submit', async (event) => {
     formData.append('passwordProtected', String(passwordProtected));
     if (passwordProtected) formData.append('password', password);
     const response = await fetch('/api/short/image', { method: 'POST', body: formData });
-    const payload = await response.json().catch(() => ({}));
+    const responseText = await response.text();
+    let payload = {};
+    try {
+      payload = responseText ? JSON.parse(responseText) : {};
+    } catch {
+      payload = {};
+    }
     if (!response.ok) {
+      if (!payload.errorCode && [502, 503, 504].includes(response.status)) {
+        payload = { errorCode: 'MEDIA_GATEWAY_FAILED', status: response.status };
+      } else if (!payload.errorCode && response.status === 413) {
+        payload = { errorCode: 'MEDIA_TOO_LARGE' };
+      }
       setError(imageErrorText, imageErrorFromPayload(payload));
       return;
     }
