@@ -14,3 +14,27 @@
 [data-pane="ticket"] .settings-group::before {
   background: linear-gradient(90deg, rgba(246,180,79,.34), rgba(76,141,255,.18), transparent);
 }
+
+.number-chain-reset-confirmation {
+  display: grid;
+  flex: 1 1 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.number-chain-reset-confirmation button {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 14px;
+}
+
+.number-chain-progress-control.is-confirming > #nc_nextNumber {
+  display: none;
+}
+
+@media (max-width: 1200px) {
+  .number-chain-reset-confirmation {
+    grid-template-columns: 1fr;
+  }
+}

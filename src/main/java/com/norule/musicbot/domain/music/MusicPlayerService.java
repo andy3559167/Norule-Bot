@@ -66,6 +66,13 @@ public class MusicPlayerService {
     private static final String SPOTIFY_PERSONAL_PLAYLIST_ERROR_KEY = "SPOTIFY_PERSONAL_PLAYLIST_UNSUPPORTED";
     private static final String SPOTIFY_UNSUPPORTED_LINK_ERROR_KEY = "SPOTIFY_UNSUPPORTED_LINK";
     private static final String SPOTIFY_JAM_UNSUPPORTED_ERROR_KEY = "SPOTIFY_JAM_UNSUPPORTED";
+    private static final Pattern SPOTIFY_URL_START_PATTERN = Pattern.compile(
+            "(?i)https?://(?:www\\.)?open\\.spotify\\.com/"
+    );
+    private static final Pattern SPOTIFY_RESOURCE_PATTERN = Pattern.compile(
+            "(?i)^https?://(?:www\\.)?open\\.spotify\\.com/(?:intl-[a-z]{2}/)?"
+                    + "(track|album|playlist|artist)/([a-zA-Z0-9_-]+)"
+    );
     private static final String YOUTUBE_PRECHECK_BLOCKED_ERROR_KEY = "YOUTUBE_PRECHECK_BLOCKED";
     private static final String YOUTUBE_PRECHECK_TIMEOUT_ERROR_KEY = "YOUTUBE_PRECHECK_TIMEOUT";
     private static final String YOUTUBE_PRECHECK_UNAVAILABLE_ERROR_KEY = "YOUTUBE_PRECHECK_UNAVAILABLE";
@@ -260,7 +267,8 @@ public class MusicPlayerService {
             try {
                 return sourceClass
                         .getConstructor(String.class, String.class, boolean.class, String.class, String.class, String.class, Function.class, resolverType)
-                        .newInstance(clientId, clientSecret, preferAnonymousToken, spDc, countryCode, customTokenEndpoint, managerFunction, resolver);
+                        .newInstance(clientId, clientSecret, preferAnonymousToken, customTokenEndpoint, spDc, countryCode,
+                                managerFunction, resolver);
             } catch (NoSuchMethodException ignored) {
             }
         }
@@ -537,9 +545,11 @@ public class MusicPlayerService {
         GuildMusicManager guildMusicManager = getGuildMusicManager(guild);
         clearAutoplayNotice(guild.getIdLong());
         resumeIfPaused(guildMusicManager.getPlayer(), guild.getIdLong());
-        ResolvedInput resolvedInput = resolveInput(input);
+        String normalizedInput = normalizeRepeatedSpotifyUrl(input);
+        ResolvedInput resolvedInput = resolveInput(normalizedInput);
         String identifier = resolvedInput.isUrl ? resolvedInput.identifier : YT_SEARCH_PREFIX + resolvedInput.identifier;
-        load(guild.getIdLong(), guildMusicManager, messageSender, input, identifier, resolvedInput.sourceLabel, true, requesterId, requesterName, 0);
+        load(guild.getIdLong(), guildMusicManager, messageSender, normalizedInput, identifier,
+                resolvedInput.sourceLabel, true, requesterId, requesterName, 0);
     }
 
     public void searchTopTracks(String query, int limit, Consumer<List<AudioTrack>> onSuccess, Consumer<String> onError) {
@@ -1614,6 +1624,30 @@ public class MusicPlayerService {
                 .replaceAll("[\\[\\](){}|]+", " ")
                 .replaceAll("\\s+", " ")
                 .trim();
+    }
+
+    static String normalizeRepeatedSpotifyUrl(String input) {
+        if (input == null) {
+            return "";
+        }
+        String trimmed = input.trim();
+        Matcher urlStarts = SPOTIFY_URL_START_PATTERN.matcher(trimmed);
+        if (!urlStarts.find() || urlStarts.start() != 0 || !urlStarts.find()) {
+            return trimmed;
+        }
+
+        String firstUrl = trimmed.substring(0, urlStarts.start()).trim();
+        String repeatedUrl = trimmed.substring(urlStarts.start()).trim();
+        return isSameSpotifyResource(firstUrl, repeatedUrl) ? firstUrl : trimmed;
+    }
+
+    private static boolean isSameSpotifyResource(String firstUrl, String secondUrl) {
+        Matcher firstResource = SPOTIFY_RESOURCE_PATTERN.matcher(firstUrl);
+        Matcher secondResource = SPOTIFY_RESOURCE_PATTERN.matcher(secondUrl);
+        return firstResource.find()
+                && secondResource.find()
+                && firstResource.group(1).equalsIgnoreCase(secondResource.group(1))
+                && firstResource.group(2).equals(secondResource.group(2));
     }
 
     private ResolvedInput resolveInput(String input) {

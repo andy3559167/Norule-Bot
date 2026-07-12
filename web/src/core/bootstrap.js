@@ -226,7 +226,7 @@ export function createAppRuntime(deps) {
         createMusicTab({ settingsFormModule, dirtyStateModule }),
         createPrivateRoomTab({ settingsFormModule, dirtyStateModule }),
         createWelcomeTab({ settingsFormModule, welcomeModule, actions: appActions, dirtyStateModule }),
-        createNumberChainTab({ settingsFormModule, actions: appActions, dirtyStateModule }),
+        createNumberChainTab({ settingsFormModule, actions: appActions, dirtyStateModule, i18nModule }),
         createTicketTab({ settingsFormModule, ticketModule, updateSupportRoleCount, dirtyStateModule })
       ]
     });
