@@ -392,10 +392,6 @@ public final class ImageShareService {
     private void retireExpiredShare(ImageShare imageShare, long now) {
         if (now - imageShare.expiresAt() >= options.get().expiredShareRetentionMillis()) {
             delete(imageShare);
-            return;
-        }
-        if (!imageShare.isVideo()) {
-            deleteStoredImage(imageShare);
         }
     }
 

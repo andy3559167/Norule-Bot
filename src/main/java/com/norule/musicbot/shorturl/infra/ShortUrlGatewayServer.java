@@ -8,7 +8,6 @@ import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import net.dv8tion.jda.api.utils.data.DataObject;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.InetSocketAddress;
@@ -147,11 +146,6 @@ public final class ShortUrlGatewayServer {
 
         if (!isGetOrHead(exchange)) {
             sendText(exchange, 405, "Method Not Allowed");
-            return;
-        }
-
-        if (shortUrlService.findExpiredImageShare(code) != null) {
-            sendHtml(exchange, 410, buildImageExpiredPage());
             return;
         }
 
@@ -358,10 +352,6 @@ public final class ShortUrlGatewayServer {
         }
         ImageShare imageShare = shortUrlService.resolveImageShare(code);
         if (imageShare == null) {
-            if (shortUrlService.findExpiredImageShare(code) != null) {
-                sendImageError(exchange, 410, "SHARE_EXPIRED", "This share has expired");
-                return;
-            }
             sendImageError(exchange, 404, "IMAGE_NOT_FOUND", "Image share not found");
             return;
         }
@@ -383,10 +373,6 @@ public final class ShortUrlGatewayServer {
         }
         ImageShare imageShare = shortUrlService.resolveImageShare(code);
         if (imageShare == null) {
-            if (shortUrlService.findExpiredImageShare(code) != null) {
-                sendImageError(exchange, 410, "SHARE_EXPIRED", "This share has expired");
-                return;
-            }
             sendImageError(exchange, 404, "IMAGE_NOT_FOUND", "Image share not found");
             return;
         }
@@ -541,10 +527,6 @@ public final class ShortUrlGatewayServer {
         }
         try (InputStream input = shortUrlService.openImageShare(imageShare)) {
             if (input == null) {
-                if (shortUrlService.findExpiredImageShare(imageShare.code()) != null) {
-                    sendHtml(exchange, 410, buildImageExpiredPage());
-                    return;
-                }
                 sendHtml(exchange, 404, buildShortUrlNotFoundPage());
                 return;
             }
@@ -805,19 +787,40 @@ public final class ShortUrlGatewayServer {
         if (contentLength > limit) {
             throw new RequestBodyTooLargeException();
         }
-        try (InputStream input = exchange.getRequestBody(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[8192];
-            long total = 0L;
+        int initialCapacity = contentLength > 0L ? (int) contentLength : 8192;
+        byte[] body = new byte[Math.max(1, initialCapacity)];
+        byte[] chunk = new byte[8192];
+        long total = 0L;
+        try (InputStream input = exchange.getRequestBody()) {
             int read;
-            while ((read = input.read(buffer)) >= 0) {
+            while ((read = input.read(chunk)) >= 0) {
+                if (read == 0) {
+                    continue;
+                }
                 total += read;
                 if (total > limit) {
                     throw new RequestBodyTooLargeException();
                 }
-                output.write(buffer, 0, read);
+                if (total > body.length) {
+                    int newCapacity = body.length;
+                    while (newCapacity < total) {
+                        int doubled = newCapacity > Integer.MAX_VALUE / 2
+                                ? Integer.MAX_VALUE
+                                : newCapacity * 2;
+                        newCapacity = (int) Math.min(limit, doubled);
+                        if (newCapacity <= body.length) {
+                            throw new RequestBodyTooLargeException();
+                        }
+                    }
+                    body = Arrays.copyOf(body, newCapacity);
+                }
+                System.arraycopy(chunk, 0, body, (int) total - read, read);
             }
-            return output.toByteArray();
         }
+        if (total == body.length) {
+            return body;
+        }
+        return Arrays.copyOf(body, (int) total);
     }
 
     private long parseContentLength(String rawContentLength) {

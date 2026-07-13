@@ -156,7 +156,7 @@ class ImageShareServiceTest {
     }
 
     @Test
-    void retainsExpiredVideoForTheConfiguredPeriodWhileRemovingExpiredImages() throws Exception {
+    void retainsExpiredMediaForTheConfiguredPeriod() throws Exception {
         MutableClock clock = new MutableClock(Instant.parse("2026-07-11T12:00:00Z"));
         InMemoryImageRepository repository = new InMemoryImageRepository();
         InMemoryImageStorage storage = new InMemoryImageStorage();
@@ -180,11 +180,13 @@ class ImageShareServiceTest {
         clock.advanceMillis(oneMinute);
         assertNull(service.resolve(video.code()));
         assertNull(service.open(video));
+        assertNull(service.resolve(image.code()));
+        assertNull(service.open(image));
         assertNotNull(service.findExpired(video.code()));
 
         service.cleanupExpired();
         assertTrue(storage.exists(video));
-        assertFalse(storage.exists(image));
+        assertTrue(storage.exists(image));
         assertNotNull(service.findExpired(image.code()));
 
         clock.advanceMillis(retention);
