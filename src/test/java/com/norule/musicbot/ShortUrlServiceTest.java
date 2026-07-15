@@ -134,6 +134,23 @@ class ShortUrlServiceTest {
         assertEquals(1L, events.get(0).viewCount());
     }
 
+    @Test
+    void recordsDiscordCreatorAndWebClientAddressForCreationLogs() {
+        ShortUrlService service = new ShortUrlService(new InMemoryRepository());
+        List<ShortUrlAccessEvent> events = new ArrayList<>();
+        service.updateLogChannelId(123456789L);
+        service.updateAccessPublisher((channelId, event) -> events.add(event));
+
+        service.create("https://example.com/discord", "discord-code", "123456789012345678", "");
+        service.create("https://example.com/web", "web-code", "", "198.51.100.42");
+
+        assertEquals(2, events.size());
+        assertEquals("123456789012345678", events.get(0).creatorDiscordUserId());
+        assertEquals("", events.get(0).clientAddress());
+        assertEquals("", events.get(1).creatorDiscordUserId());
+        assertEquals("198.51.100.42", events.get(1).clientAddress());
+    }
+
     private static final class InMemoryRepository implements ShortUrlRepository {
         private final Map<String, ShortUrlService.ShortUrlEntry> store = new LinkedHashMap<>();
         private Long logChannelId;

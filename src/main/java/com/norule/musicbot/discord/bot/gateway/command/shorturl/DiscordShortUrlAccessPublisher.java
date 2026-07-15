@@ -56,6 +56,13 @@ public final class DiscordShortUrlAccessPublisher implements ShortUrlAccessPubli
         } else {
             embed.addField("目標網址", safe(event.target(), 1000), false);
         }
+        String creatorDiscordUserId = event.creatorDiscordUserId() == null ? "" : event.creatorDiscordUserId();
+        if (!viewed && !creatorDiscordUserId.isBlank()) {
+            embed.addField("\u5efa\u7acb\u5e33\u865f", discordMention(creatorDiscordUserId), true);
+        }
+        if ((image || video) && !viewed && event.fileSizeBytes() > 0L) {
+            embed.addField("\u6a94\u6848\u5927\u5c0f", formatFileSize(event.fileSizeBytes()), true);
+        }
         String clientAddress = event.clientAddress() == null ? "" : event.clientAddress();
         if (!clientAddress.isBlank()) {
             embed.addField("來源 IP", '`' + safe(clientAddress, 128) + '`', true);
@@ -64,6 +71,24 @@ public final class DiscordShortUrlAccessPublisher implements ShortUrlAccessPubli
             }
         }
         return embed;
+    }
+
+    private String discordMention(String userId) {
+        String normalized = userId == null ? "" : userId.trim();
+        return normalized.matches("\\d{17,20}") ? "<@" + normalized + ">" : safe(normalized, 128);
+    }
+
+    private String formatFileSize(long sizeBytes) {
+        if (sizeBytes < 1024L) {
+            return sizeBytes + " B";
+        }
+        if (sizeBytes < 1024L * 1024L) {
+            return String.format(java.util.Locale.ROOT, "%.1f KB", sizeBytes / 1024.0D);
+        }
+        if (sizeBytes < 1024L * 1024L * 1024L) {
+            return String.format(java.util.Locale.ROOT, "%.1f MB", sizeBytes / (1024.0D * 1024.0D));
+        }
+        return String.format(java.util.Locale.ROOT, "%.1f GB", sizeBytes / (1024.0D * 1024.0D * 1024.0D));
     }
 
     private String safe(String value, int maxLength) {

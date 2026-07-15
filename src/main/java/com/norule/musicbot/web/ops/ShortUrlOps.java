@@ -17,6 +17,10 @@ public final class ShortUrlOps {
         return shortUrlService.create(url, customCode);
     }
 
+    public ShortUrl createFromWeb(String url, String customCode, String clientAddress) {
+        return shortUrlService.create(url, customCode, "", clientAddress);
+    }
+
     public ShortUrl resolve(String code) {
         return shortUrlService.resolve(code);
     }

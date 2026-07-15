@@ -96,18 +96,33 @@ public final class ShortUrlService {
     }
 
     public ShortUrlEntry create(String rawTarget) {
-        return create(rawTarget, options.get().ttlMillis());
+        return create(rawTarget, "");
     }
 
     public ShortUrlEntry create(String rawTarget, String customSlug) {
-        return create(rawTarget, customSlug, options.get().ttlMillis());
+        return create(rawTarget, customSlug, "", "");
+    }
+
+    public ShortUrlEntry create(String rawTarget,
+                                String customSlug,
+                                String creatorDiscordUserId,
+                                String clientAddress) {
+        return create(rawTarget, customSlug, options.get().ttlMillis(), creatorDiscordUserId, clientAddress);
     }
 
     public ShortUrlEntry create(String rawTarget, long ttlMillis) {
-        return create(rawTarget, null, ttlMillis);
+        return create(rawTarget, null, ttlMillis, "", "");
     }
 
     public ShortUrlEntry create(String rawTarget, String customSlug, long ttlMillis) {
+        return create(rawTarget, customSlug, ttlMillis, "", "");
+    }
+
+    private ShortUrlEntry create(String rawTarget,
+                                 String customSlug,
+                                 long ttlMillis,
+                                 String creatorDiscordUserId,
+                                 String clientAddress) {
         String target = domainService.normalizeTarget(rawTarget);
         if (!domainService.isValidTarget(target)) {
             return null;
@@ -139,7 +154,8 @@ public final class ShortUrlService {
         ShortUrlEntry created = new ShortUrlEntry(code, target, now, now + safeTtl, 0L);
         repository.save(created);
         publishAccess(ShortUrlAccessEvent.Action.CREATED, ShortUrlAccessEvent.ResourceType.URL,
-                created.code(), created.target(), created.viewCount(), created.expiresAt(), false, "", "");
+                created.code(), created.target(), created.viewCount(), created.expiresAt(), false, 0L,
+                creatorDiscordUserId, clientAddress, "");
         return created;
     }
 
@@ -216,7 +232,7 @@ public final class ShortUrlService {
             ImageShare imageShare = result.imageShare();
             publishAccess(ShortUrlAccessEvent.Action.CREATED, mediaResourceType(imageShare),
                     imageShare.code(), imageShare.contentType(), imageShare.viewCount(), imageShare.expiresAt(),
-                    imageShare.isPasswordProtected(), clientAddress, userAgent);
+                    imageShare.isPasswordProtected(), imageShare.sizeBytes(), "", clientAddress, userAgent);
         }
         return result;
     }
@@ -243,8 +259,8 @@ public final class ShortUrlService {
         }
         ShortUrlEntry viewed = entry.withViewCount(repository.incrementViewCount(entry.code()));
         publishAccess(ShortUrlAccessEvent.Action.VIEWED, ShortUrlAccessEvent.ResourceType.URL,
-                viewed.code(), viewed.target(), viewed.viewCount(), viewed.expiresAt(), false,
-                clientAddress, userAgent);
+                viewed.code(), viewed.target(), viewed.viewCount(), viewed.expiresAt(), false, 0L,
+                "", clientAddress, userAgent);
         return viewed;
     }
 
@@ -255,7 +271,7 @@ public final class ShortUrlService {
         ImageShare viewed = imageShareService.recordView(imageShare);
         publishAccess(ShortUrlAccessEvent.Action.VIEWED, mediaResourceType(viewed),
                 viewed.code(), viewed.contentType(), viewed.viewCount(), viewed.expiresAt(),
-                viewed.isPasswordProtected(), clientAddress, userAgent);
+                viewed.isPasswordProtected(), viewed.sizeBytes(), "", clientAddress, userAgent);
         return viewed;
     }
 
@@ -380,6 +396,8 @@ public final class ShortUrlService {
                                long viewCount,
                                long expiresAt,
                                boolean passwordProtected,
+                               long fileSizeBytes,
+                               String creatorDiscordUserId,
                                String clientAddress,
                                String userAgent) {
         Long channelId = logChannelId;
@@ -396,6 +414,8 @@ public final class ShortUrlService {
                     Math.max(0L, viewCount),
                     expiresAt,
                     passwordProtected,
+                    Math.max(0L, fileSizeBytes),
+                    creatorDiscordUserId == null ? "" : creatorDiscordUserId,
                     clientAddress == null ? "" : clientAddress,
                     userAgent == null ? "" : userAgent,
                     System.currentTimeMillis()

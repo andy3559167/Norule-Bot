@@ -27,7 +27,12 @@ public final class UrlCommandHandler {
             return;
         }
 
-        ShortUrlService.ShortUrlEntry entry = shortUrlService.create(target, slug);
+        ShortUrlService.ShortUrlEntry entry = shortUrlService.create(
+                target,
+                slug,
+                event.getUser().getId(),
+                ""
+        );
         if (entry == null) {
             event.replyEmbeds(errorEmbed(
                             lang,

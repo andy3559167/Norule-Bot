@@ -21,6 +21,16 @@ public final class ShortUrlService {
         return map(created);
     }
 
+    public ShortUrl create(String url, String customCode, String creatorDiscordUserId, String clientAddress) {
+        com.norule.musicbot.ShortUrlService.ShortUrlEntry created = coreService.create(
+                url,
+                customCode,
+                creatorDiscordUserId,
+                clientAddress
+        );
+        return map(created);
+    }
+
     public ShortUrl resolve(String code) {
         com.norule.musicbot.ShortUrlService.ShortUrlEntry entry = coreService.resolve(code);
         return map(entry);

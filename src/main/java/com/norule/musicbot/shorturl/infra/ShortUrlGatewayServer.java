@@ -217,7 +217,12 @@ public final class ShortUrlGatewayServer {
             return;
         }
 
-        ShortUrlService.ShortUrlEntry created = shortUrlService.create(target, customCode);
+        ShortUrlService.ShortUrlEntry created = shortUrlService.create(
+                target,
+                customCode,
+                "",
+                clientAddress(exchange)
+        );
         if (created == null) {
             sendJson(exchange, 400, DataObject.empty()
                     .put("error", "Invalid url or code")

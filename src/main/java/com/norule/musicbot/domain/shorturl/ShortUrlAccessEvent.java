@@ -9,6 +9,8 @@ public record ShortUrlAccessEvent(
         long viewCount,
         long expiresAt,
         boolean passwordProtected,
+        long fileSizeBytes,
+        String creatorDiscordUserId,
         String clientAddress,
         String userAgent,
         long occurredAt
