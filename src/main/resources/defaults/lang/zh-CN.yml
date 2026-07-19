@@ -767,6 +767,12 @@ report:
   embed_channel: "来源频道"
   embed_time: "时间"
 
+quest_notifications:
+  configured: "已设置任务公告转发。来源：{sourceChannel}（`{sourceChannelId}`）；通知频道：{notificationChannel}（`{notificationChannelId}`）。"
+  same_channel: "来源频道与通知频道必须不同。"
+  new_quest_title: "新的 Discord 任务公告"
+  new_quest_description: "在 {sourceChannel} 检测到新的公告。\n[查看原始公告]({messageUrl})"
+
 
 
 

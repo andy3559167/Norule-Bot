@@ -1,6 +1,7 @@
 package com.norule.musicbot.config;
 
 import com.norule.musicbot.storage.sqlite.GuildSettingsSqliteRepository;
+import com.norule.musicbot.config.domain.QuestNotificationConfig;
 import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.Yaml;
 
@@ -25,6 +26,7 @@ public class GuildSettingsService {
         private final BotConfig.Music music;
         private final BotConfig.PrivateRoom privateRoom;
         private final BotConfig.Ticket ticket;
+        private final QuestNotificationConfig questNotifications;
 
         public GuildSettings(String language,
                              BotConfig.Notifications notifications,
@@ -32,7 +34,8 @@ public class GuildSettingsService {
                              BotConfig.MessageLogs messageLogs,
                              BotConfig.Music music,
                              BotConfig.PrivateRoom privateRoom,
-                             BotConfig.Ticket ticket) {
+                             BotConfig.Ticket ticket,
+                             QuestNotificationConfig questNotifications) {
             this.language = language;
             this.notifications = notifications;
             this.welcome = welcome;
@@ -40,6 +43,7 @@ public class GuildSettingsService {
             this.music = music;
             this.privateRoom = privateRoom;
             this.ticket = ticket;
+            this.questNotifications = questNotifications == null ? QuestNotificationConfig.defaultValues() : questNotifications;
         }
 
         public String getLanguage() {
@@ -70,32 +74,40 @@ public class GuildSettingsService {
             return ticket;
         }
 
+        public QuestNotificationConfig getQuestNotifications() {
+            return questNotifications;
+        }
+
         public GuildSettings withLanguage(String language) {
-            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket);
+            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
         }
 
         public GuildSettings withNotifications(BotConfig.Notifications notifications) {
-            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket);
+            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
         }
 
         public GuildSettings withWelcome(BotConfig.Welcome welcome) {
-            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket);
+            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
         }
 
         public GuildSettings withMessageLogs(BotConfig.MessageLogs messageLogs) {
-            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket);
+            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
         }
 
         public GuildSettings withMusic(BotConfig.Music music) {
-            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket);
+            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
         }
 
         public GuildSettings withPrivateRoom(BotConfig.PrivateRoom privateRoom) {
-            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket);
+            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
         }
 
         public GuildSettings withTicket(BotConfig.Ticket ticket) {
-            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket);
+            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
+        }
+
+        public GuildSettings withQuestNotifications(QuestNotificationConfig questNotifications) {
+            return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
         }
     }
 
@@ -118,7 +130,8 @@ public class GuildSettingsService {
                 BotConfig.MessageLogs.defaultValues(),
                 BotConfig.Music.defaultValues(),
                 BotConfig.PrivateRoom.defaultValues(),
-                BotConfig.Ticket.defaultValues()
+                BotConfig.Ticket.defaultValues(),
+                QuestNotificationConfig.defaultValues()
         );
 
         try {
@@ -160,6 +173,10 @@ public class GuildSettingsService {
         return getSettings(guildId).getTicket();
     }
 
+    public QuestNotificationConfig getQuestNotifications(long guildId) {
+        return getSettings(guildId).getQuestNotifications();
+    }
+
     public Path getSettingsDirectory() {
         return settingsDir;
     }
@@ -186,7 +203,8 @@ public class GuildSettingsService {
                     BotConfig.MessageLogs.defaultValues(),
                     BotConfig.Music.defaultValues(),
                     BotConfig.PrivateRoom.defaultValues(),
-                    BotConfig.Ticket.defaultValues()
+                    BotConfig.Ticket.defaultValues(),
+                    QuestNotificationConfig.defaultValues()
             );
         }
         cache.clear();
@@ -348,6 +366,12 @@ public class GuildSettingsService {
         ticketMap.put("blacklistedUserIds", ticket.getBlacklistedUserIds().stream().map(String::valueOf).toList());
         root.put("ticket", ticketMap);
 
+        QuestNotificationConfig questNotifications = settings.getQuestNotifications();
+        Map<String, Object> questNotificationsMap = new LinkedHashMap<>();
+        questNotificationsMap.put("sourceChannelId", toText(questNotifications.getSourceChannelId()));
+        questNotificationsMap.put("notificationChannelId", toText(questNotifications.getNotificationChannelId()));
+        root.put("questNotifications", questNotificationsMap);
+
         DumperOptions options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         options.setPrettyFlow(true);
@@ -380,7 +404,9 @@ public class GuildSettingsService {
         BotConfig.Music music = BotConfig.Music.fromMap(asMap(rootMap.get("music")), defaults.getMusic());
         BotConfig.PrivateRoom privateRoom = BotConfig.PrivateRoom.fromMap(asMap(rootMap.get("privateRoom")), defaults.getPrivateRoom());
         BotConfig.Ticket ticket = BotConfig.Ticket.fromMap(asMap(rootMap.get("ticket")), defaults.getTicket());
-        return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket);
+        QuestNotificationConfig questNotifications = QuestNotificationConfig.fromMap(
+                asMap(rootMap.get("questNotifications")), defaults.getQuestNotifications());
+        return new GuildSettings(language, notifications, welcome, messageLogs, music, privateRoom, ticket, questNotifications);
     }
 
     @SuppressWarnings("unchecked")

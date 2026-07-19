@@ -11,4 +11,6 @@ public final class CommandOptions {
     public static final String PREFIX = "prefix";
     public static final String LOG_SETTING = "log-setting";
     public static final String TYPE = "type";
+    public static final String SOURCE_CHANNEL = "source-channel";
+    public static final String NOTIFICATION_CHANNEL = "notification-channel";
 }

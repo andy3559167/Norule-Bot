@@ -37,6 +37,10 @@ public final class GuildConfigOps {
                 owner.welcomeCommandHandler().handleWelcomeSlash(event, lang);
                 yield true;
             }
+            case "quest-notifications" -> {
+                owner.questNotificationCommandHandler().handleQuestNotificationsSlash(event, lang);
+                yield true;
+            }
             default -> false;
         };
     }

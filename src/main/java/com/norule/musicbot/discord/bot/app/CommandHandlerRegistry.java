@@ -19,6 +19,7 @@ import com.norule.musicbot.discord.bot.gateway.command.music.MusicStatsCommandHa
 import com.norule.musicbot.discord.bot.gateway.command.music.MusicTextResolver;
 import com.norule.musicbot.discord.bot.gateway.command.music.PlaylistCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.privateroom.PrivateRoomSettingsCommandHandler;
+import com.norule.musicbot.discord.bot.gateway.command.quest.QuestNotificationCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.report.ReportCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.SettingsCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.menu.SettingsLanguageMenuHandler;
@@ -27,6 +28,7 @@ import com.norule.musicbot.discord.bot.gateway.command.settings.menu.SettingsWor
 import com.norule.musicbot.discord.bot.gateway.command.settings.view.SettingsUiText;
 import com.norule.musicbot.discord.bot.gateway.command.shorturl.UrlCommandHandler;
 import com.norule.musicbot.discord.bot.gateway.command.welcome.WelcomeCommandHandler;
+import com.norule.musicbot.discord.bot.service.quest.QuestNotificationService;
 import com.norule.musicbot.discord.bot.gateway.panel.MusicPanelController;
 import com.norule.musicbot.ops.minecraft.MinecraftStatusOps;
 
@@ -53,6 +55,7 @@ class CommandHandlerRegistry {
     private final NumberChainCommandHandler numberChainCommandHandler;
     private final WordChainCommandHandler wordChainCommandHandler;
     private final ReportCommandHandler reportCommandHandler;
+    private final QuestNotificationCommandHandler questNotificationCommandHandler;
 
     CommandHandlerRegistry(MusicCommandService service,
                            MusicPanelController musicPanelController,
@@ -89,6 +92,8 @@ class CommandHandlerRegistry {
         this.reportCommandHandler = new ReportCommandHandler(
                 service::i18nService,
                 () -> service.runtimeConfigSnapshot().getReportDeveloperChannelId());
+        this.questNotificationCommandHandler = new QuestNotificationCommandHandler(
+                new QuestNotificationService(service.settingsService()), service::i18nService);
     }
 
     SettingsCommandHandler settingsCommandHandler() { return settingsCommandHandler; }
@@ -113,4 +118,5 @@ class CommandHandlerRegistry {
     NumberChainCommandHandler numberChainCommandHandler() { return numberChainCommandHandler; }
     WordChainCommandHandler wordChainCommandHandler() { return wordChainCommandHandler; }
     ReportCommandHandler reportCommandHandler() { return reportCommandHandler; }
+    QuestNotificationCommandHandler questNotificationCommandHandler() { return questNotificationCommandHandler; }
 }

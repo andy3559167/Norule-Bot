@@ -3,6 +3,7 @@ package com.norule.musicbot.discord.bot.gateway.command.settings.menu;
 import com.norule.musicbot.discord.bot.app.MusicCommandService;
 import com.norule.musicbot.discord.bot.gateway.component.ComponentIds;
 import com.norule.musicbot.config.GuildSettingsService;
+import com.norule.musicbot.config.domain.QuestNotificationConfig;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.components.actionrow.ActionRow;
 import net.dv8tion.jda.api.components.buttons.Button;
@@ -188,7 +189,8 @@ public final class SettingsResetMenuHandler {
             case ROUTE_LANGUAGE -> owner.settingsService().updateSettings(guildId,
                     s -> s.withLanguage(owner.runtimeConfigSnapshot().getDefaultLanguage()));
             case "notifications" -> owner.settingsService().updateSettings(guildId,
-                    s -> s.withNotifications(owner.runtimeConfigSnapshot().getDefaultNotifications()));
+                    s -> s.withNotifications(owner.runtimeConfigSnapshot().getDefaultNotifications())
+                            .withQuestNotifications(QuestNotificationConfig.defaultValues()));
             case "message-logs" -> owner.settingsService().updateSettings(guildId,
                     s -> s.withMessageLogs(owner.runtimeConfigSnapshot().getDefaultMessageLogs()));
             case CMD_MUSIC -> owner.settingsService().updateSettings(guildId,
@@ -206,7 +208,8 @@ public final class SettingsResetMenuHandler {
                         owner.runtimeConfigSnapshot().getDefaultMessageLogs(),
                         owner.runtimeConfigSnapshot().getDefaultMusic(),
                         owner.runtimeConfigSnapshot().getDefaultPrivateRoom(),
-                        owner.runtimeConfigSnapshot().getDefaultTicket()
+                        owner.runtimeConfigSnapshot().getDefaultTicket(),
+                        QuestNotificationConfig.defaultValues()
                 ));
                 resetNumberChainSettings(guildId);
             }
