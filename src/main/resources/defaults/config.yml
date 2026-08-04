@@ -7,6 +7,15 @@ prefix: "!"
 # Enable debug logging
 debug: false
 
+# Runtime dependency bootstrap download behavior
+runtime-dependencies:
+  progress-enabled: true
+  progress-interval-ms: 2000
+  connect-timeout-ms: 10000
+  read-timeout-ms: 60000
+  stall-timeout-ms: 15000
+  max-retries: 3
+
 # Restrict slash command registration to a guild ID (empty = global)
 commandGuildId: ""
 

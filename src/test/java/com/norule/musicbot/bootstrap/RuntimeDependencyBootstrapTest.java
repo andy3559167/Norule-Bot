@@ -74,6 +74,33 @@ class RuntimeDependencyBootstrapTest {
     }
 
     @Test
+    void readsRuntimeDependencyDownloadSettingsFromConfig() throws IOException {
+        Path config = tempDir.resolve("config.yml");
+        Files.writeString(config, """
+                token: "ignored-secret"
+                runtime-dependencies:
+                  progress-enabled: false
+                  progress-interval-ms: 3500
+                  connect-timeout-ms: 12000
+                  read-timeout-ms: 70000
+                  stall-timeout-ms: 18000
+                  max-retries: 4
+                web:
+                  enabled: false
+                """, StandardCharsets.UTF_8);
+
+        RuntimeDependencyBootstrap.BootstrapSettings settings =
+                RuntimeDependencyBootstrap.BootstrapSettings.fromConfig(config);
+
+        assertFalse(settings.progressEnabled());
+        assertEquals(3_500, settings.progressIntervalMs());
+        assertEquals(12_000, settings.connectTimeoutMs());
+        assertEquals(70_000, settings.readTimeoutMs());
+        assertEquals(18_000, settings.stallTimeoutMs());
+        assertEquals(4, settings.maxRetries());
+    }
+
+    @Test
     void removesOldArtifactVersionAndDownloadsCurrentVersion() throws IOException {
         Path runtimeLibs = createRuntimeLibs();
         Files.writeString(runtimeLibs.resolve("demo-1.0.0.jar"), "old", StandardCharsets.UTF_8);
@@ -228,6 +255,7 @@ class RuntimeDependencyBootstrapTest {
         Path runtimeLibs = createRuntimeLibs();
         byte[] expectedBytes = "valid jar bytes".getBytes(StandardCharsets.UTF_8);
         Files.write(runtimeLibs.resolve("demo-2.0.0.jar"), expectedBytes);
+        Files.writeString(runtimeLibs.resolve("demo-2.0.0.jar.part"), "stale partial", StandardCharsets.UTF_8);
 
         RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
@@ -237,6 +265,7 @@ class RuntimeDependencyBootstrapTest {
                 RuntimeDependencyBootstrapTest::failUnexpectedDownload);
 
         assertTrue(Files.isRegularFile(runtimeLibs.resolve("demo-2.0.0.jar")));
+        assertFalse(Files.exists(runtimeLibs.resolve("demo-2.0.0.jar.part")));
     }
 
     @Test

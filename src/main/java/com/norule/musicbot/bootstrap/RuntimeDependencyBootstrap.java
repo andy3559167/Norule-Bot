@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.lang.management.ManagementFactory;
-import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -33,6 +32,12 @@ final class RuntimeDependencyBootstrap {
     static final String CLEANUP_OBSOLETE_PROPERTY = "norule.bootstrap.cleanup-obsolete";
     static final String VERIFY_CHECKSUMS_PROPERTY = "norule.bootstrap.verify-checksums";
     static final String FORCE_REDOWNLOAD_PROPERTY = "norule.bootstrap.force-redownload";
+    static final String PROGRESS_ENABLED_PROPERTY = "norule.bootstrap.progress-enabled";
+    static final String PROGRESS_INTERVAL_PROPERTY = "norule.bootstrap.progress-interval-ms";
+    static final String CONNECT_TIMEOUT_PROPERTY = "norule.bootstrap.connect-timeout-ms";
+    static final String READ_TIMEOUT_PROPERTY = "norule.bootstrap.read-timeout-ms";
+    static final String STALL_TIMEOUT_PROPERTY = "norule.bootstrap.stall-timeout-ms";
+    static final String MAX_RETRIES_PROPERTY = "norule.bootstrap.max-retries";
     static final String RUNTIME_LIB_DIRECTORY = "runtime-libs";
     private static final String ENABLE_NATIVE_ACCESS_ARG = "--enable-native-access=ALL-UNNAMED";
     private static final String SHA_256 = "SHA-256";
@@ -50,9 +55,6 @@ final class RuntimeDependencyBootstrap {
             "https://maven.lavalink.dev/releases",
             "https://maven.topi.wtf/releases"
     );
-
-    private static final int CONNECT_TIMEOUT_MS = 15_000;
-    private static final int READ_TIMEOUT_MS = 60_000;
 
     private RuntimeDependencyBootstrap() {
     }
@@ -76,11 +78,12 @@ final class RuntimeDependencyBootstrap {
 
         Path workingDir = Path.of(".").toAbsolutePath().normalize();
         Path libDir = workingDir.resolve(RUNTIME_LIB_DIRECTORY);
-        BootstrapSettings settings = BootstrapSettings.fromSystemProperties();
         try {
+            BootstrapSettings settings = BootstrapSettings.fromConfig(workingDir.resolve("config.yml"));
             Map<String, String> checksums = loadRuntimeDependencyChecksums();
             synchronizeRuntimeDependencies(libDir, artifacts, checksums, settings,
-                    RuntimeDependencyBootstrap::downloadArtifact);
+                    new RuntimeDependencyDownloader(settings, REMOTE_REPOSITORIES,
+                            message -> LOGGER.log(System.Logger.Level.INFO, message)));
             int exitCode = relaunchWithLibClasspath(launcherPath, libDir, args);
             System.exit(exitCode);
         } catch (IOException e) {
@@ -195,19 +198,30 @@ final class RuntimeDependencyBootstrap {
 
     static void synchronizeRuntimeDependencies(Path libDir, List<DependencyArtifact> artifacts,
             Map<String, String> checksums, BootstrapSettings settings, ArtifactDownloader downloader) throws IOException {
+        synchronizeRuntimeDependencies(libDir, artifacts, checksums, settings,
+                (artifact, destination, index, total) -> downloader.download(artifact, destination));
+    }
+
+    static void synchronizeRuntimeDependencies(Path libDir, List<DependencyArtifact> artifacts,
+            Map<String, String> checksums, BootstrapSettings settings, ProgressArtifactDownloader downloader)
+            throws IOException {
         List<DependencyArtifact> activeArtifacts = removeConflictingProviders(artifacts);
         validateLogbackVersions(activeArtifacts);
         validateChecksums(activeArtifacts, checksums, settings);
         Files.createDirectories(libDir);
 
-        int downloaded = downloadRequiredArtifacts(libDir, activeArtifacts, checksums, settings, downloader);
-        int deleted = cleanupRuntimeJars(libDir, activeArtifacts, settings.cleanupObsolete());
-        verifySynchronizedArtifacts(libDir, activeArtifacts, checksums, settings);
-
-        if (downloaded > 0 || deleted > 0) {
-            LOGGER.log(System.Logger.Level.INFO, "[NoRule] Runtime dependencies synchronized in: "
-                    + libDir.toAbsolutePath() + " (downloaded=" + downloaded + ", deleted=" + deleted + ")");
+        SyncStats stats = new SyncStats(activeArtifacts.size(), System.nanoTime());
+        LOGGER.log(System.Logger.Level.INFO,
+                "[NoRule] Preparing runtime dependencies: total=" + activeArtifacts.size());
+        try {
+            downloadRequiredArtifacts(libDir, activeArtifacts, checksums, settings, downloader, stats);
+            stats.removed = cleanupRuntimeJars(libDir, activeArtifacts, settings.cleanupObsolete());
+            verifySynchronizedArtifacts(libDir, activeArtifacts, checksums, settings);
+        } catch (IOException e) {
+            logSummary(stats);
+            throw e;
         }
+        logSummary(stats);
     }
 
     private static List<DependencyArtifact> removeConflictingProviders(List<DependencyArtifact> artifacts) {
@@ -263,20 +277,34 @@ final class RuntimeDependencyBootstrap {
         }
     }
 
-    private static int downloadRequiredArtifacts(Path libDir, List<DependencyArtifact> artifacts,
-            Map<String, String> checksums, BootstrapSettings settings, ArtifactDownloader downloader) throws IOException {
-        int downloaded = 0;
-        for (DependencyArtifact artifact : artifacts) {
+    private static void downloadRequiredArtifacts(Path libDir, List<DependencyArtifact> artifacts,
+            Map<String, String> checksums, BootstrapSettings settings, ProgressArtifactDownloader downloader,
+            SyncStats stats) throws IOException {
+        for (int artifactIndex = 0; artifactIndex < artifacts.size(); artifactIndex++) {
+            DependencyArtifact artifact = artifacts.get(artifactIndex);
+            int displayIndex = artifactIndex + 1;
             String fileName = buildJarFileName(artifact);
             Path target = libDir.resolve(fileName);
             if (!requiresDownload(target, checksums.get(fileName), settings)) {
+                Files.deleteIfExists(partFile(target));
+                stats.reused++;
                 continue;
             }
-            downloadAndReplace(artifact, target, checksums.get(fileName), settings.verifyChecksums(), downloader);
-            downloaded++;
-            LOGGER.log(System.Logger.Level.INFO, "[NoRule] Downloaded dependency: " + fileName);
+            long startedAt = System.nanoTime();
+            try {
+                long size = downloadAndReplace(artifact, target, checksums.get(fileName), settings.verifyChecksums(),
+                        downloader, displayIndex, artifacts.size());
+                stats.downloaded++;
+                stats.totalBytes += size;
+                LOGGER.log(System.Logger.Level.INFO, String.format(Locale.ROOT,
+                        "[NoRule] Downloaded %d/%d: %s size=%.1f MB duration=%.1fs",
+                        displayIndex, artifacts.size(), fileName, bytesToMegabytes(size),
+                        elapsedSeconds(startedAt, System.nanoTime())));
+            } catch (IOException e) {
+                stats.failed++;
+                throw e;
+            }
         }
-        return downloaded;
     }
 
     private static boolean requiresDownload(Path target, String expectedChecksum, BootstrapSettings settings)
@@ -287,12 +315,12 @@ final class RuntimeDependencyBootstrap {
         return settings.verifyChecksums() && !expectedChecksum.equals(sha256(target));
     }
 
-    private static void downloadAndReplace(DependencyArtifact artifact, Path target, String expectedChecksum,
-            boolean verifyChecksum, ArtifactDownloader downloader) throws IOException {
-        Path tempFile = target.resolveSibling(target.getFileName().toString() + ".part");
+    private static long downloadAndReplace(DependencyArtifact artifact, Path target, String expectedChecksum,
+            boolean verifyChecksum, ProgressArtifactDownloader downloader, int index, int total) throws IOException {
+        Path tempFile = partFile(target);
         Files.deleteIfExists(tempFile);
         try {
-            downloader.download(artifact, tempFile);
+            downloader.download(artifact, tempFile, index, total);
             if (!Files.isRegularFile(tempFile)) {
                 throw new IOException("Dependency downloader did not create a file for " + artifact);
             }
@@ -304,6 +332,7 @@ final class RuntimeDependencyBootstrap {
                 }
             }
             moveAtomically(tempFile, target);
+            return Files.size(target);
         } finally {
             Files.deleteIfExists(tempFile);
         }
@@ -315,6 +344,10 @@ final class RuntimeDependencyBootstrap {
         } catch (AtomicMoveNotSupportedException e) {
             throw new IOException("Atomic replacement is not supported for runtime dependency: " + target, e);
         }
+    }
+
+    private static Path partFile(Path target) {
+        return target.resolveSibling(target.getFileName().toString() + ".part");
     }
 
     private static int cleanupRuntimeJars(Path libDir, List<DependencyArtifact> artifacts, boolean cleanupObsolete)
@@ -361,49 +394,6 @@ final class RuntimeDependencyBootstrap {
             if (settings.verifyChecksums() && !checksums.get(fileName).equals(sha256(target))) {
                 throw new IOException("Runtime dependency checksum failed after synchronization: " + fileName);
             }
-        }
-    }
-
-    private static void downloadArtifact(DependencyArtifact artifact, Path destination) throws IOException {
-        List<String> attemptedUrls = new ArrayList<>();
-        IOException lastException = null;
-        for (String repo : REMOTE_REPOSITORIES) {
-            String relativePath = toRelativeArtifactPath(artifact);
-            String url = trimTrailingSlash(repo) + "/" + relativePath;
-            attemptedUrls.add(url);
-            try {
-                if (downloadFrom(url, destination)) {
-                    return;
-                }
-            } catch (IOException e) {
-                lastException = e;
-            }
-        }
-        IOException failure = new IOException("Unable to download artifact " + artifact + " from repositories: " + attemptedUrls);
-        if (lastException != null) {
-            failure.addSuppressed(lastException);
-        }
-        throw failure;
-    }
-
-    private static boolean downloadFrom(String url, Path destination) throws IOException {
-        // S1874: replaced deprecated new URL(String) with URI.create(...).toURL()
-        HttpURLConnection connection = (HttpURLConnection) URI.create(url).toURL().openConnection();
-        connection.setInstanceFollowRedirects(true);
-        connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
-        connection.setReadTimeout(READ_TIMEOUT_MS);
-        connection.setRequestMethod("GET");
-        int status = connection.getResponseCode();
-        if (status != HttpURLConnection.HTTP_OK) {
-            connection.disconnect();
-            return false;
-        }
-
-        try (InputStream in = connection.getInputStream()) {
-            Files.copy(in, destination, StandardCopyOption.REPLACE_EXISTING);
-            return true;
-        } finally {
-            connection.disconnect();
         }
     }
 
@@ -465,13 +455,13 @@ final class RuntimeDependencyBootstrap {
         }
     }
 
-    private static String toRelativeArtifactPath(DependencyArtifact artifact) {
+    static String toRelativeArtifactPath(DependencyArtifact artifact) {
         String groupPath = artifact.groupId().replace('.', '/');
         String fileName = buildJarFileName(artifact);
         return groupPath + "/" + artifact.artifactId() + "/" + artifact.version() + "/" + fileName;
     }
 
-    private static String trimTrailingSlash(String value) {
+    static String trimTrailingSlash(String value) {
         if (value.endsWith("/")) {
             return value.substring(0, value.length() - 1);
         }
@@ -544,15 +534,76 @@ final class RuntimeDependencyBootstrap {
         return os.toLowerCase().contains("win");
     }
 
+    private static double bytesToMegabytes(long bytes) {
+        return bytes / (1024.0 * 1024.0);
+    }
+
+    private static double elapsedSeconds(long startedAtNanos, long completedAtNanos) {
+        return Math.max(0L, completedAtNanos - startedAtNanos) / 1_000_000_000.0;
+    }
+
+    private static void logSummary(SyncStats stats) {
+        LOGGER.log(System.Logger.Level.INFO, String.format(Locale.ROOT,
+                "[NoRule] Runtime dependencies summary: required=%d downloaded=%d reused=%d removed=%d failed=%d "
+                        + "totalBytes=%d duration=%.1fs",
+                stats.required, stats.downloaded, stats.reused, stats.removed, stats.failed, stats.totalBytes,
+                elapsedSeconds(stats.startedAtNanos, System.nanoTime())));
+    }
+
     record DependencyArtifact(String groupId, String artifactId, String version, String classifier) {
     }
 
-    record BootstrapSettings(boolean cleanupObsolete, boolean verifyChecksums, boolean forceRedownload) {
+    record BootstrapSettings(boolean cleanupObsolete, boolean verifyChecksums, boolean forceRedownload,
+            boolean progressEnabled, int progressIntervalMs, int connectTimeoutMs, int readTimeoutMs,
+            int stallTimeoutMs, int maxRetries) {
+        private static final boolean DEFAULT_PROGRESS_ENABLED = true;
+        private static final int DEFAULT_PROGRESS_INTERVAL_MS = 2_000;
+        private static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+        private static final int DEFAULT_READ_TIMEOUT_MS = 60_000;
+        private static final int DEFAULT_STALL_TIMEOUT_MS = 15_000;
+        private static final int DEFAULT_MAX_RETRIES = 3;
+
+        BootstrapSettings(boolean cleanupObsolete, boolean verifyChecksums, boolean forceRedownload) {
+            this(cleanupObsolete, verifyChecksums, forceRedownload, DEFAULT_PROGRESS_ENABLED,
+                    DEFAULT_PROGRESS_INTERVAL_MS, DEFAULT_CONNECT_TIMEOUT_MS, DEFAULT_READ_TIMEOUT_MS,
+                    DEFAULT_STALL_TIMEOUT_MS, DEFAULT_MAX_RETRIES);
+        }
+
+        BootstrapSettings {
+            requirePositive("progress-interval-ms", progressIntervalMs);
+            requirePositive("connect-timeout-ms", connectTimeoutMs);
+            requirePositive("read-timeout-ms", readTimeoutMs);
+            requirePositive("stall-timeout-ms", stallTimeoutMs);
+            if (maxRetries < 0) {
+                throw new IllegalStateException("runtime-dependencies.max-retries must be zero or greater");
+            }
+        }
+
         static BootstrapSettings fromSystemProperties() {
+            return fromValues(Map.of());
+        }
+
+        static BootstrapSettings fromConfig(Path configPath) throws IOException {
+            Map<String, String> values = Files.isRegularFile(configPath)
+                    ? parseRuntimeDependencySettings(Files.readAllLines(configPath, StandardCharsets.UTF_8))
+                    : Map.of();
+            return fromValues(values);
+        }
+
+        private static BootstrapSettings fromValues(Map<String, String> values) {
             return new BootstrapSettings(
                     readBooleanProperty(CLEANUP_OBSOLETE_PROPERTY, true),
                     readBooleanProperty(VERIFY_CHECKSUMS_PROPERTY, true),
-                    readBooleanProperty(FORCE_REDOWNLOAD_PROPERTY, false));
+                    readBooleanProperty(FORCE_REDOWNLOAD_PROPERTY, false),
+                    readBooleanSetting(values, "progress-enabled", PROGRESS_ENABLED_PROPERTY,
+                            DEFAULT_PROGRESS_ENABLED),
+                    readIntSetting(values, "progress-interval-ms", PROGRESS_INTERVAL_PROPERTY,
+                            DEFAULT_PROGRESS_INTERVAL_MS),
+                    readIntSetting(values, "connect-timeout-ms", CONNECT_TIMEOUT_PROPERTY,
+                            DEFAULT_CONNECT_TIMEOUT_MS),
+                    readIntSetting(values, "read-timeout-ms", READ_TIMEOUT_PROPERTY, DEFAULT_READ_TIMEOUT_MS),
+                    readIntSetting(values, "stall-timeout-ms", STALL_TIMEOUT_PROPERTY, DEFAULT_STALL_TIMEOUT_MS),
+                    readIntSetting(values, "max-retries", MAX_RETRIES_PROPERTY, DEFAULT_MAX_RETRIES));
         }
 
         private static boolean readBooleanProperty(String propertyName, boolean defaultValue) {
@@ -565,10 +616,135 @@ final class RuntimeDependencyBootstrap {
             }
             throw new IllegalStateException("Invalid boolean JVM property " + propertyName + ": " + value);
         }
+
+        private static boolean readBooleanSetting(Map<String, String> values, String key, String propertyName,
+                boolean defaultValue) {
+            String value = configuredValue(values, key, propertyName);
+            if (value == null) {
+                return defaultValue;
+            }
+            if ("true".equalsIgnoreCase(value) || "false".equalsIgnoreCase(value)) {
+                return Boolean.parseBoolean(value);
+            }
+            throw new IllegalStateException("Invalid boolean runtime dependency setting " + key + ": " + value);
+        }
+
+        private static int readIntSetting(Map<String, String> values, String key, String propertyName,
+                int defaultValue) {
+            String value = configuredValue(values, key, propertyName);
+            if (value == null) {
+                return defaultValue;
+            }
+            try {
+                return Integer.parseInt(value);
+            } catch (NumberFormatException e) {
+                throw new IllegalStateException("Invalid integer runtime dependency setting " + key + ": " + value,
+                        e);
+            }
+        }
+
+        private static String configuredValue(Map<String, String> values, String key, String propertyName) {
+            String propertyValue = System.getProperty(propertyName);
+            return propertyValue == null ? values.get(key) : propertyValue;
+        }
+
+        private static void requirePositive(String key, int value) {
+            if (value <= 0) {
+                throw new IllegalStateException("runtime-dependencies." + key + " must be greater than zero");
+            }
+        }
+    }
+
+    static Map<String, String> parseRuntimeDependencySettings(List<String> lines) {
+        Map<String, String> values = new LinkedHashMap<>();
+        boolean inSection = false;
+        int sectionIndent = -1;
+        for (String line : lines) {
+            if (line == null || line.isBlank() || line.stripLeading().startsWith("#")) {
+                continue;
+            }
+            int indent = leadingSpaces(line);
+            String trimmed = line.trim();
+            if (!inSection) {
+                if (indent == 0 && trimmed.matches("runtime-dependencies\\s*:\\s*(?:#.*)?")) {
+                    inSection = true;
+                    sectionIndent = indent;
+                }
+                continue;
+            }
+            if (indent <= sectionIndent) {
+                break;
+            }
+            int separator = trimmed.indexOf(':');
+            if (separator <= 0) {
+                continue;
+            }
+            String key = trimmed.substring(0, separator).trim();
+            String value = stripInlineComment(trimmed.substring(separator + 1)).trim();
+            if (!key.isBlank() && !value.isBlank()) {
+                values.put(key, unquote(value));
+            }
+        }
+        return values;
+    }
+
+    private static int leadingSpaces(String value) {
+        int count = 0;
+        while (count < value.length() && value.charAt(count) == ' ') {
+            count++;
+        }
+        return count;
+    }
+
+    private static String stripInlineComment(String value) {
+        boolean singleQuoted = false;
+        boolean doubleQuoted = false;
+        for (int index = 0; index < value.length(); index++) {
+            char current = value.charAt(index);
+            if (current == '\'' && !doubleQuoted) {
+                singleQuoted = !singleQuoted;
+            } else if (current == '"' && !singleQuoted) {
+                doubleQuoted = !doubleQuoted;
+            } else if (current == '#' && !singleQuoted && !doubleQuoted) {
+                return value.substring(0, index);
+            }
+        }
+        return value;
+    }
+
+    private static String unquote(String value) {
+        if (value.length() >= 2) {
+            char first = value.charAt(0);
+            char last = value.charAt(value.length() - 1);
+            if ((first == '\'' && last == '\'') || (first == '"' && last == '"')) {
+                return value.substring(1, value.length() - 1);
+            }
+        }
+        return value;
+    }
+
+    private static final class SyncStats {
+        private final int required;
+        private final long startedAtNanos;
+        private int downloaded;
+        private int reused;
+        private int removed;
+        private int failed;
+        private long totalBytes;
+
+        private SyncStats(int required, long startedAtNanos) {
+            this.required = required;
+            this.startedAtNanos = startedAtNanos;
+        }
     }
 
     @FunctionalInterface
     interface ArtifactDownloader {
         void download(DependencyArtifact artifact, Path destination) throws IOException;
+    }
+
+    @FunctionalInterface
+    interface ProgressArtifactDownloader {
+        void download(DependencyArtifact artifact, Path destination, int index, int total) throws IOException;
     }
 }
