@@ -115,7 +115,7 @@ public final class SpotifyWebApiPlaylistInspector implements SpotifyPlaylistInsp
                     if (token.isBlank()) {
                         logInspection(requestContext, "token", playlistId, null, response.statusCode(),
                                 "TOKEN_RESPONSE_MISSING_ACCESS_TOKEN", Outcome.UNAVAILABLE);
-                        return TokenResult.failure(Inspection.unavailable());
+                        return TokenResult.failure(Inspection.unavailable(response.statusCode()));
                     }
                     long expiresIn = Math.max(60L, body.path("expires_in").asLong(3600L));
                     Instant expiresAt = Instant.now().plusSeconds(Math.max(30L, expiresIn - 60L));
@@ -124,14 +124,14 @@ public final class SpotifyWebApiPlaylistInspector implements SpotifyPlaylistInsp
                 } catch (Exception exception) {
                     logInspection(requestContext, "token", playlistId, null, response.statusCode(),
                             "INVALID_TOKEN_RESPONSE", Outcome.UNAVAILABLE);
-                    return TokenResult.failure(Inspection.unavailable());
+                    return TokenResult.failure(Inspection.unavailable(response.statusCode()));
                 }
             }
 
             String reason = spotifyErrorReason(response.body());
             Outcome outcome = tokenFailureOutcome(response.statusCode(), reason);
             logInspection(requestContext, "token", playlistId, null, response.statusCode(), reason, outcome);
-            return TokenResult.failure(new Inspection(outcome, null));
+            return TokenResult.failure(new Inspection(outcome, null, response.statusCode()));
         });
     }
 
@@ -146,7 +146,7 @@ public final class SpotifyWebApiPlaylistInspector implements SpotifyPlaylistInsp
                 Outcome outcome = apiFailureOutcome(response.statusCode(), false);
                 invalidateTokenOnUnauthorized(response.statusCode());
                 logInspection(requestContext, "metadata", playlistId, null, response.statusCode(), reason, outcome);
-                return CompletableFuture.completedFuture(new Inspection(outcome, null));
+                return CompletableFuture.completedFuture(new Inspection(outcome, null, response.statusCode()));
             }
 
             Metadata metadata;
@@ -155,7 +155,7 @@ public final class SpotifyWebApiPlaylistInspector implements SpotifyPlaylistInsp
             } catch (Exception exception) {
                 logInspection(requestContext, "metadata", playlistId, null, response.statusCode(),
                         "INVALID_METADATA_RESPONSE", Outcome.UNAVAILABLE);
-                return CompletableFuture.completedFuture(Inspection.unavailable());
+                return CompletableFuture.completedFuture(Inspection.unavailable(response.statusCode()));
             }
             return inspectItemsPage(playlistId, accessToken, market, requestContext, metadata, 0, 0);
         });
@@ -176,7 +176,7 @@ public final class SpotifyWebApiPlaylistInspector implements SpotifyPlaylistInsp
                 Outcome outcome = apiFailureOutcome(response.statusCode(), true);
                 invalidateTokenOnUnauthorized(response.statusCode());
                 logInspection(requestContext, stage, playlistId, metadata, response.statusCode(), reason, outcome);
-                return CompletableFuture.completedFuture(new Inspection(outcome, metadata));
+                return CompletableFuture.completedFuture(new Inspection(outcome, metadata, response.statusCode()));
             }
 
             try {
@@ -186,13 +186,15 @@ public final class SpotifyWebApiPlaylistInspector implements SpotifyPlaylistInsp
                     logInspection(requestContext, stage, playlistId, metadata, response.statusCode(),
                             "ITEMS_FIELD_MISSING", Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED);
                     return CompletableFuture.completedFuture(
-                            new Inspection(Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED, metadata)
+                            new Inspection(Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED, metadata, response.statusCode())
                     );
                 }
                 if (containsValidTrack(items)) {
                     logInspection(requestContext, stage, playlistId, metadata, response.statusCode(),
                             "OK", Outcome.READABLE);
-                    return CompletableFuture.completedFuture(new Inspection(Outcome.READABLE, metadata));
+                    return CompletableFuture.completedFuture(
+                            new Inspection(Outcome.READABLE, metadata, response.statusCode())
+                    );
                 }
 
                 int responseTotal = root.path("total").asInt(-1);
@@ -213,7 +215,7 @@ public final class SpotifyWebApiPlaylistInspector implements SpotifyPlaylistInsp
                     logInspection(requestContext, stage, playlistId, metadata, response.statusCode(),
                             "ITEM_PAGE_LIMIT_REACHED", Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED);
                     return CompletableFuture.completedFuture(
-                            new Inspection(Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED, metadata)
+                            new Inspection(Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED, metadata, response.statusCode())
                     );
                 }
 
@@ -229,12 +231,12 @@ public final class SpotifyWebApiPlaylistInspector implements SpotifyPlaylistInsp
                         ? "PLAYLIST_EMPTY"
                         : "NO_VALID_TRACKS_IN_NON_EMPTY_PLAYLIST";
                 logInspection(requestContext, stage, playlistId, metadata, response.statusCode(), reason, outcome);
-                return CompletableFuture.completedFuture(new Inspection(outcome, metadata));
+                return CompletableFuture.completedFuture(new Inspection(outcome, metadata, response.statusCode()));
             } catch (Exception exception) {
                 logInspection(requestContext, stage, playlistId, metadata, response.statusCode(),
                         "INVALID_ITEMS_RESPONSE", Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED);
                 return CompletableFuture.completedFuture(
-                        new Inspection(Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED, metadata)
+                        new Inspection(Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED, metadata, response.statusCode())
                 );
             }
         });

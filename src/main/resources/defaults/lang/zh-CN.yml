@@ -27,6 +27,7 @@ music:
   stopped: "已停止播放并清空队列。"
   load_failed: "加载歌曲失败：{error}"
   load_failed_generic: "无法加载这首歌曲，请换一个链接或稍后再试。"
+  spotify_generated_playlist_unavailable: "这是 Spotify 动态生成或个性化的播放列表，目前无法获取其中的歌曲。请将歌曲复制到你自己创建的公开播放列表后重试。"
   spotify_playlist_restricted: "已识别此 Spotify 播放列表，但 Spotify 限制第三方应用程序读取其中的歌曲。这通常发生于个性化推荐或 Spotify 官方播放列表。请将歌曲复制到你自己创建的公开播放列表后再试。"
   spotify_playlist_empty: "这个 Spotify 播放列表目前没有可播放的歌曲。"
   spotify_playlist_auth_failed: "Spotify 验证失败，暂时无法读取播放列表。"

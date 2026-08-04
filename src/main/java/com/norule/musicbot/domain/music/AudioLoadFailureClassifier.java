@@ -21,6 +21,11 @@ public final class AudioLoadFailureClassifier {
         HTTP_SERVER_ERROR,
         UNSUPPORTED_FORMAT,
         SOURCE_RATE_LIMITED,
+        SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE,
+        SPOTIFY_AUTH_FAILED,
+        SPOTIFY_RATE_LIMITED,
+        SPOTIFY_RESTRICTED_OR_PERSONALIZED,
+        SPOTIFY_PLAYLIST_EMPTY,
         TRACK_STUCK,
         TEMPORARY_SOURCE_FAILURE,
         UNKNOWN
@@ -29,6 +34,9 @@ public final class AudioLoadFailureClassifier {
     public Category classify(Throwable failure) {
         if (failure == null) {
             return Category.UNKNOWN;
+        }
+        if (isSpotifyGeneratedPlaylistUnavailable(failure)) {
+            return Category.SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE;
         }
         Category messageCategory = Category.UNKNOWN;
         Throwable current = failure;
@@ -77,7 +85,21 @@ public final class AudioLoadFailureClassifier {
         if (category == null) {
             return "AUDIO_UNKNOWN";
         }
+        if (category.name().startsWith("SPOTIFY_")) {
+            return category.name();
+        }
         return "AUDIO_" + category.name();
+    }
+
+    private boolean isSpotifyGeneratedPlaylistUnavailable(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            String message = normalizedMessage(current);
+            if (message.contains("spotify generated playlists")
+                    && message.contains("anonymous token")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Category classifyMessage(String message) {

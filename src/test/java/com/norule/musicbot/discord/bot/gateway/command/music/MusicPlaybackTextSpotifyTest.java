@@ -18,6 +18,11 @@ class MusicPlaybackTextSpotifyTest {
         MusicPlaybackText text = new MusicPlaybackText(() -> i18n);
 
         assertEquals(
+                "This is a Spotify-generated or personalized playlist, and its tracks cannot currently be "
+                        + "accessed. Please copy the tracks to a public playlist you created and try again.",
+                text.mapMusicLoadError("en", "SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE")
+        );
+        assertEquals(
                 "This Spotify playlist was recognized, but Spotify prevents third-party apps from reading its tracks. "
                         + "This commonly affects personalized recommendations and Spotify-owned playlists. "
                         + "Copy the tracks to a public playlist you created, then try again.",
@@ -42,6 +47,10 @@ class MusicPlaybackTextSpotifyTest {
         I18nService i18n = I18nService.load(languageDir, "zh-TW");
         MusicPlaybackText text = new MusicPlaybackText(() -> i18n);
 
+        assertEquals(
+                "這是 Spotify 動態產生或個人化的播放清單，目前無法取得其中的歌曲。請將歌曲複製到你自己建立的公開播放清單後再試。",
+                text.mapMusicLoadError("zh-TW", "SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE")
+        );
         assertEquals(
                 "已辨識此 Spotify 播放清單，但 Spotify 限制第三方應用程式讀取其中的歌曲。這通常發生於個人化推薦或 Spotify 官方播放清單。請將歌曲複製到你自己建立的公開播放清單後再試。",
                 text.mapMusicLoadError("zh-TW", "SPOTIFY_RESTRICTED_OR_PERSONALIZED")
@@ -73,6 +82,10 @@ class MusicPlaybackTextSpotifyTest {
         assertEquals(
                 "Spotify 请求过于频繁，请稍后再试。",
                 text.mapMusicLoadError("zh-CN", "SPOTIFY_RATE_LIMITED")
+        );
+        assertEquals(
+                "这是 Spotify 动态生成或个性化的播放列表，目前无法获取其中的歌曲。请将歌曲复制到你自己创建的公开播放列表后重试。",
+                text.mapMusicLoadError("zh-CN", "AUDIO_SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE")
         );
     }
 }

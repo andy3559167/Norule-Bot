@@ -84,6 +84,7 @@ public class MusicPlayerService {
     private static final String TRACK_RECOVERING_ERROR_KEY = "AUDIO_TRACK_RECOVERING";
     private static final String TRACK_RECOVERY_EXHAUSTED_ERROR_KEY = "AUDIO_TRACK_RECOVERY_EXHAUSTED";
     private static final String TRACK_RECOVERY_FAILED_ERROR_KEY = "AUDIO_TRACK_RECOVERY_FAILED";
+    private static final AudioLoadFailureClassifier FAILURE_CLASSIFIER = new AudioLoadFailureClassifier();
     private static final Pattern SPOTIFY_URL_START_PATTERN = Pattern.compile(
             "(?i)https?://(?:www\\.)?open\\.spotify\\.com/"
     );
@@ -104,7 +105,6 @@ public class MusicPlayerService {
     private final MusicDataService musicDataService;
     private final SpotifyPlaylistInspector spotifyPlaylistInspector;
     private final AudioInputClassifier inputClassifier = new AudioInputClassifier();
-    private final AudioLoadFailureClassifier failureClassifier = new AudioLoadFailureClassifier();
     private final TrackRecoveryService trackRecoveryService;
     private final Map<Long, GuildMusicManager> musicManagers = new ConcurrentHashMap<>();
     private final Map<Long, Runnable> guildStateListeners = new ConcurrentHashMap<>();
@@ -738,7 +738,7 @@ public class MusicPlayerService {
                       String requesterName,
                       int spotifyRateLimitRetryAttempt) {
         load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel, allowFallback,
-                requesterId, requesterName, spotifyRateLimitRetryAttempt, false);
+                requesterId, requesterName, spotifyRateLimitRetryAttempt, null);
     }
 
     private void load(long guildId,
@@ -751,7 +751,7 @@ public class MusicPlayerService {
                       Long requesterId,
                       String requesterName,
                       int spotifyRateLimitRetryAttempt,
-                      boolean spotifyPlaylistInspected) {
+                      SpotifyPlaylistInspector.Inspection spotifyPlaylistInspection) {
         String inputError = validateInputForLoad(userInput);
         if (inputError != null) {
             messageSender.accept("LOAD_FAILED:" + inputError);
@@ -780,7 +780,7 @@ public class MusicPlayerService {
                 }
             }
         }
-        if (spotifySourceEnabled && isSpotifyPlaylistUrl(userInput) && !spotifyPlaylistInspected) {
+        if (spotifySourceEnabled && isSpotifyPlaylistUrl(userInput) && spotifyPlaylistInspection == null) {
             inspectSpotifyPlaylistThenLoad(
                     guildId,
                     guildMusicManager,
@@ -871,7 +871,24 @@ public class MusicPlayerService {
 
             @Override
             public void loadFailed(FriendlyException exception) {
-                logLoadFailureDetails("queue/load", userInput, identifier, exception);
+                AudioLoadFailureClassifier.Category category = resolveLoadFailureCategory(
+                        exception,
+                        spotifyPlaylistInspection
+                );
+                logLoadFailureDetails(
+                        "queue/load",
+                        guildId,
+                        userInput,
+                        identifier,
+                        spotifyPlaylistInspection,
+                        category,
+                        exception
+                );
+                if (isSpotifyPlaylistUrl(userInput)
+                        && category == AudioLoadFailureClassifier.Category.SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE) {
+                    messageSender.accept("LOAD_FAILED:" + FAILURE_CLASSIFIER.errorKey(category));
+                    return;
+                }
                 if (isSpotifyJamLink(userInput)) {
                     messageSender.accept("LOAD_FAILED:" + SPOTIFY_JAM_UNSUPPORTED_ERROR_KEY);
                     return;
@@ -880,16 +897,27 @@ public class MusicPlayerService {
                     messageSender.accept("LOAD_FAILED:" + SPOTIFY_UNSUPPORTED_LINK_ERROR_KEY);
                     return;
                 }
-                if (looksLikeSpotifyUrl(userInput) && isSpotifyAuthFailure(exception)) {
+                if (looksLikeSpotifyUrl(userInput)
+                        && (category == AudioLoadFailureClassifier.Category.SPOTIFY_AUTH_FAILED
+                        || isSpotifyAuthFailure(exception))) {
                     messageSender.accept("LOAD_FAILED:" + SPOTIFY_AUTH_FAILED_ERROR_KEY);
                     return;
                 }
-                if (looksLikeSpotifyUrl(userInput) && isSpotifyRateLimited(exception)) {
+                if (looksLikeSpotifyUrl(userInput)
+                        && (category == AudioLoadFailureClassifier.Category.SPOTIFY_RATE_LIMITED
+                        || isSpotifyRateLimited(exception))) {
                     applySpotifyRateLimitCooldown(guildId, requesterId);
                     messageSender.accept("LOAD_FAILED:" + SPOTIFY_RATE_LIMIT_ERROR_KEY);
                     return;
                 }
-                if (isSpotifyPlaylistUrl(userInput) && isSpotifySecretFailure(exception)) {
+                if (isSpotifyPlaylistUrl(userInput)
+                        && category == AudioLoadFailureClassifier.Category.SPOTIFY_PLAYLIST_EMPTY) {
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_EMPTY_PLAYLIST_ERROR_KEY);
+                    return;
+                }
+                if (isSpotifyPlaylistUrl(userInput)
+                        && (category == AudioLoadFailureClassifier.Category.SPOTIFY_RESTRICTED_OR_PERSONALIZED
+                        || isSpotifySecretFailure(exception))) {
                     messageSender.accept("LOAD_FAILED:" + SPOTIFY_RESTRICTED_PLAYLIST_ERROR_KEY);
                     return;
                 }
@@ -904,7 +932,7 @@ public class MusicPlayerService {
                             sanitizeInputForLog(userInput)
                     );
                     load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel,
-                            allowFallback, requesterId, requesterName, nextAttempt, true);
+                            allowFallback, requesterId, requesterName, nextAttempt, spotifyPlaylistInspection);
                     return;
                 }
                 if (looksLikeSpotifyOrShareUrl(userInput) && isUnknownFileFormat(exception)) {
@@ -916,11 +944,10 @@ public class MusicPlayerService {
                     load(guildId, guildMusicManager, messageSender, userInput, fallbackIdentifier, sourceLabel, false, requesterId, requesterName, 0);
                     return;
                 }
-                AudioLoadFailureClassifier.Category category = failureClassifier.classify(exception);
                 if (category != AudioLoadFailureClassifier.Category.UNKNOWN
                         && !looksLikeYouTubeUrl(userInput)
                         && !looksLikeSpotifyUrl(userInput)) {
-                    messageSender.accept("LOAD_FAILED:" + failureClassifier.errorKey(category));
+                    messageSender.accept("LOAD_FAILED:" + FAILURE_CLASSIFIER.errorKey(category));
                 } else {
                     messageSender.accept("LOAD_FAILED:" + exception.getMessage());
                 }
@@ -957,7 +984,8 @@ public class MusicPlayerService {
                             return;
                         }
                         load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel,
-                                allowFallback, requesterId, requesterName, spotifyRateLimitRetryAttempt, true);
+                                allowFallback, requesterId, requesterName, spotifyRateLimitRetryAttempt,
+                                inspection == null ? SpotifyPlaylistInspector.Inspection.unavailable() : inspection);
                     });
         } catch (RuntimeException exception) {
             LOGGER.warn(
@@ -967,7 +995,8 @@ public class MusicPlayerService {
                     rootCauseDetails(exception)
             );
             load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel,
-                    allowFallback, requesterId, requesterName, spotifyRateLimitRetryAttempt, true);
+                    allowFallback, requesterId, requesterName, spotifyRateLimitRetryAttempt,
+                    SpotifyPlaylistInspector.Inspection.unavailable());
         }
     }
 
@@ -997,6 +1026,26 @@ public class MusicPlayerService {
             }
         }
         return true;
+    }
+
+    static AudioLoadFailureClassifier.Category resolveLoadFailureCategory(
+            Throwable failure,
+            SpotifyPlaylistInspector.Inspection inspection) {
+        AudioLoadFailureClassifier.Category throwableCategory = FAILURE_CLASSIFIER.classify(failure);
+        if (throwableCategory != AudioLoadFailureClassifier.Category.UNKNOWN) {
+            return throwableCategory;
+        }
+        if (inspection == null || inspection.outcome() == null) {
+            return AudioLoadFailureClassifier.Category.UNKNOWN;
+        }
+        return switch (inspection.outcome()) {
+            case SPOTIFY_PLAYLIST_EMPTY -> AudioLoadFailureClassifier.Category.SPOTIFY_PLAYLIST_EMPTY;
+            case SPOTIFY_RESTRICTED_OR_PERSONALIZED ->
+                    AudioLoadFailureClassifier.Category.SPOTIFY_RESTRICTED_OR_PERSONALIZED;
+            case SPOTIFY_AUTH_FAILED -> AudioLoadFailureClassifier.Category.SPOTIFY_AUTH_FAILED;
+            case SPOTIFY_RATE_LIMITED -> AudioLoadFailureClassifier.Category.SPOTIFY_RATE_LIMITED;
+            case READABLE, UNAVAILABLE -> AudioLoadFailureClassifier.Category.UNKNOWN;
+        };
     }
 
     private void applySpotifyRateLimitCooldown(long guildId, Long requesterId) {
@@ -1041,7 +1090,7 @@ public class MusicPlayerService {
         String errorKey = switch (classification.type()) {
             case SPOTIFY_SHOW -> SPOTIFY_SHOW_UNSUPPORTED_ERROR_KEY;
             case SPOTIFY_EPISODE -> SPOTIFY_EPISODE_UNSUPPORTED_ERROR_KEY;
-            case INVALID_URL -> failureClassifier.errorKey(AudioLoadFailureClassifier.Category.INVALID_INPUT);
+            case INVALID_URL -> FAILURE_CLASSIFIER.errorKey(AudioLoadFailureClassifier.Category.INVALID_INPUT);
             case UNSUPPORTED_URL -> validateUnsupportedUrl(input, classification);
             case DIRECT_HTTP_AUDIO -> validateDirectHttpInput(classification);
             default -> null;
@@ -1068,7 +1117,7 @@ public class MusicPlayerService {
                     boundary.status()
             );
         }
-        return failureClassifier.errorKey(AudioLoadFailureClassifier.Category.UNSUPPORTED_SOURCE);
+        return FAILURE_CLASSIFIER.errorKey(AudioLoadFailureClassifier.Category.UNSUPPORTED_SOURCE);
     }
 
     private String validateDirectHttpInput(AudioInputClassifier.Classification classification) {
@@ -1086,14 +1135,14 @@ public class MusicPlayerService {
                 validation.status()
         );
         if (validation.status() == AudioUrlSafetyValidator.Status.DNS_FAILURE) {
-            return failureClassifier.errorKey(AudioLoadFailureClassifier.Category.DNS_FAILURE);
+            return FAILURE_CLASSIFIER.errorKey(AudioLoadFailureClassifier.Category.DNS_FAILURE);
         }
         if (validation.status() == AudioUrlSafetyValidator.Status.INVALID_URL
                 || validation.status() == AudioUrlSafetyValidator.Status.INVALID_HOST
                 || validation.status() == AudioUrlSafetyValidator.Status.UNSUPPORTED_SCHEME) {
-            return failureClassifier.errorKey(AudioLoadFailureClassifier.Category.INVALID_INPUT);
+            return FAILURE_CLASSIFIER.errorKey(AudioLoadFailureClassifier.Category.INVALID_INPUT);
         }
-        return failureClassifier.errorKey(AudioLoadFailureClassifier.Category.UNSUPPORTED_SOURCE);
+        return FAILURE_CLASSIFIER.errorKey(AudioLoadFailureClassifier.Category.UNSUPPORTED_SOURCE);
     }
 
     private String sanitizeInputForLog(String input) {
@@ -1106,13 +1155,33 @@ public class MusicPlayerService {
         return sanitized.length() <= 300 ? sanitized : sanitized.substring(0, 300);
     }
 
-    private void logLoadFailureDetails(String context, String userInput, String identifier, FriendlyException exception) {
+    private void logLoadFailureDetails(String context,
+                                       long guildId,
+                                       String userInput,
+                                       String identifier,
+                                       SpotifyPlaylistInspector.Inspection inspection,
+                                       AudioLoadFailureClassifier.Category category,
+                                       FriendlyException exception) {
+        String inspectionOutcome = inspection == null || inspection.outcome() == null
+                ? "-"
+                : inspection.outcome().name();
+        String inspectionClassification = inspection == null || inspection.classification() == null
+                ? "-"
+                : inspection.classification().name();
+        int inspectionStatus = inspection == null ? 0 : inspection.statusCode();
         if (exception == null) {
             LOGGER.warn(
-                    "[NoRule] Load failed: context={} input={} identifier={} category=UNKNOWN message=-",
+                    "[NoRule] Load failed: context={} guildId={} input={} identifier={} playlistId={} "
+                            + "inspectionOutcome={} inspectionClassification={} inspectionStatus={} category={} message=-",
                     context,
+                    guildId,
                     sanitizeInputForLog(userInput),
-                    sanitizeInputForLog(identifier)
+                    sanitizeInputForLog(identifier),
+                    spotifyPlaylistId(userInput),
+                    inspectionOutcome,
+                    inspectionClassification,
+                    inspectionStatus,
+                    category
             );
             return;
         }
@@ -1126,18 +1195,36 @@ public class MusicPlayerService {
             }
             cause = cause.getCause();
         }
-        AudioLoadFailureClassifier.Category category = failureClassifier.classify(exception);
-        String summary = "[NoRule] Load failed: context=" + context
+        String prefix = category == AudioLoadFailureClassifier.Category.SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE
+                ? "[NoRule] Load rejected: context="
+                : "[NoRule] Load failed: context=";
+        String summary = prefix + context
+                + " guildId=" + guildId
                 + " input=" + sanitizeInputForLog(userInput)
                 + " identifier=" + sanitizeInputForLog(identifier)
+                + " playlistId=" + spotifyPlaylistId(userInput)
+                + " inspectionOutcome=" + inspectionOutcome
+                + " inspectionClassification=" + inspectionClassification
+                + " inspectionStatus=" + inspectionStatus
                 + " category=" + category
                 + " message=" + safeExceptionMessage(exception)
                 + " rootCause=" + root;
-        if (failureClassifier.isExpectedInputFailure(category)) {
+        if (FAILURE_CLASSIFIER.isExpectedInputFailure(category)) {
             LOGGER.warn(summary);
         } else {
             LOGGER.error(summary, exception);
         }
+    }
+
+    private String spotifyPlaylistId(String input) {
+        if (input == null || input.isBlank()) {
+            return "-";
+        }
+        Matcher matcher = SPOTIFY_RESOURCE_PATTERN.matcher(input.trim());
+        if (!matcher.find() || !"playlist".equalsIgnoreCase(matcher.group(1))) {
+            return "-";
+        }
+        return sanitizeInputForLog(matcher.group(2));
     }
 
     private String rootCauseDetails(Throwable exception) {
@@ -1536,11 +1623,11 @@ public class MusicPlayerService {
 
             @Override
             public void loadFailed(FriendlyException exception) {
-                AudioLoadFailureClassifier.Category category = failureClassifier.classify(exception);
+                AudioLoadFailureClassifier.Category category = FAILURE_CLASSIFIER.classify(exception);
                 if (category != AudioLoadFailureClassifier.Category.UNKNOWN
                         && !looksLikeYouTubeUrl(trimmed)
                         && !looksLikeSpotifyUrl(trimmed)) {
-                    onError.accept(failureClassifier.errorKey(category));
+                    onError.accept(FAILURE_CLASSIFIER.errorKey(category));
                 } else {
                     onError.accept(exception == null || exception.getMessage() == null ? "-" : exception.getMessage().trim());
                 }
@@ -1633,9 +1720,9 @@ public class MusicPlayerService {
     }
 
     private void handleTrackException(long guildId, AudioTrack track, Throwable exception) {
-        AudioLoadFailureClassifier.Category category = failureClassifier.classify(exception);
+        AudioLoadFailureClassifier.Category category = FAILURE_CLASSIFIER.classify(exception);
         logPlaybackFailure(guildId, track, category, exception);
-        if (failureClassifier.isRecoverable(category)) {
+        if (FAILURE_CLASSIFIER.isRecoverable(category)) {
             TrackRecoveryService.StartResult recovery = recoverTrack(guildId, track, category);
             if (recovery == TrackRecoveryService.StartResult.STARTED
                     || recovery == TrackRecoveryService.StartResult.ALREADY_IN_PROGRESS
@@ -1644,7 +1731,7 @@ public class MusicPlayerService {
                 return;
             }
         }
-        notifyPlaybackFailure(guildId, trackTitle(track), failureClassifier.errorKey(category));
+        notifyPlaybackFailure(guildId, trackTitle(track), FAILURE_CLASSIFIER.errorKey(category));
         skipFailedTrack(guildId, track);
     }
 
@@ -1667,7 +1754,7 @@ public class MusicPlayerService {
                 || recovery == TrackRecoveryService.StartResult.STALE) {
             return;
         }
-        notifyPlaybackFailure(guildId, trackTitle(track), failureClassifier.errorKey(AudioLoadFailureClassifier.Category.TRACK_STUCK));
+        notifyPlaybackFailure(guildId, trackTitle(track), FAILURE_CLASSIFIER.errorKey(AudioLoadFailureClassifier.Category.TRACK_STUCK));
         skipFailedTrack(guildId, track);
     }
 
@@ -1721,7 +1808,7 @@ public class MusicPlayerService {
 
                     @Override
                     public void recoveryFailed(Throwable failure) {
-                        logPlaybackFailure(guildId, track, failureClassifier.classify(failure), failure);
+                        logPlaybackFailure(guildId, track, FAILURE_CLASSIFIER.classify(failure), failure);
                         notifyPlaybackFailure(guildId, title, TRACK_RECOVERY_FAILED_ERROR_KEY);
                     }
 

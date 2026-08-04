@@ -44,9 +44,17 @@ public interface SpotifyPlaylistInspector {
         }
     }
 
-    record Inspection(Outcome outcome, Metadata metadata) {
+    record Inspection(Outcome outcome, Metadata metadata, int statusCode) {
+        public Inspection(Outcome outcome, Metadata metadata) {
+            this(outcome, metadata, 0);
+        }
+
         public static Inspection unavailable() {
-            return new Inspection(Outcome.UNAVAILABLE, null);
+            return unavailable(0);
+        }
+
+        public static Inspection unavailable(int statusCode) {
+            return new Inspection(Outcome.UNAVAILABLE, null, statusCode);
         }
 
         public PlaylistClassification classification() {

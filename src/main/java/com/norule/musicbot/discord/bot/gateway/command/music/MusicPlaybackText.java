@@ -8,6 +8,8 @@ import java.util.Objects;
 import java.util.function.Supplier;
 
 public final class MusicPlaybackText {
+    private static final String SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE_KEY =
+            "music.spotify_generated_playlist_unavailable";
     private final Supplier<I18nService> i18nSupplier;
 
     public MusicPlaybackText(Supplier<I18nService> i18nSupplier) {
@@ -38,6 +40,10 @@ public final class MusicPlaybackText {
     }
 
     public String mapMusicLoadError(String lang, String rawError) {
+        if ("SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE".equalsIgnoreCase(rawError)
+                || "AUDIO_SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE".equalsIgnoreCase(rawError)) {
+            return spotifyGeneratedPlaylistUnavailable(lang);
+        }
         if ("SPOTIFY_RATE_LIMITED".equalsIgnoreCase(rawError)
                 || "SPOTIFY_PLAYLIST_COOLDOWN".equalsIgnoreCase(rawError)) {
             return i18n().t(lang, "music.spotify_playlist_rate_limited");
@@ -100,6 +106,24 @@ public final class MusicPlaybackText {
             });
         }
         return i18n().t(lang, YoutubePlaybackErrorMapper.toMessageKey(rawError));
+    }
+
+    private String spotifyGeneratedPlaylistUnavailable(String lang) {
+        I18nService i18n = i18n();
+        String translated = i18n.t(lang, SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE_KEY);
+        if (!SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE_KEY.equals(translated)) {
+            return translated;
+        }
+        return switch (i18n.normalizeLanguage(lang)) {
+            case "zh-TW" -> "\u9019\u662f Spotify \u52d5\u614b\u7522\u751f\u6216\u500b\u4eba\u5316\u7684\u64ad\u653e\u6e05\u55ae\uff0c"
+                    + "\u76ee\u524d\u7121\u6cd5\u53d6\u5f97\u5176\u4e2d\u7684\u6b4c\u66f2\u3002"
+                    + "\u8acb\u5c07\u6b4c\u66f2\u8907\u88fd\u5230\u4f60\u81ea\u5df1\u5efa\u7acb\u7684\u516c\u958b\u64ad\u653e\u6e05\u55ae\u5f8c\u518d\u8a66\u3002";
+            case "zh-CN" -> "\u8fd9\u662f Spotify \u52a8\u6001\u751f\u6210\u6216\u4e2a\u6027\u5316\u7684\u64ad\u653e\u5217\u8868\uff0c"
+                    + "\u76ee\u524d\u65e0\u6cd5\u83b7\u53d6\u5176\u4e2d\u7684\u6b4c\u66f2\u3002"
+                    + "\u8bf7\u5c06\u6b4c\u66f2\u590d\u5236\u5230\u4f60\u81ea\u5df1\u521b\u5efa\u7684\u516c\u5f00\u64ad\u653e\u5217\u8868\u540e\u91cd\u8bd5\u3002";
+            default -> "This is a Spotify-generated or personalized playlist, and its tracks cannot currently be "
+                    + "accessed. Please copy the tracks to a public playlist you created and try again.";
+        };
     }
 
     private I18nService i18n() {

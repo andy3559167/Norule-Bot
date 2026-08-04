@@ -27,6 +27,7 @@ music:
   stopped: "Stopped playback and cleared queue."
   load_failed: "Failed to load track: {error}"
   load_failed_generic: "Failed to load this track. Please try another link or try again later."
+  spotify_generated_playlist_unavailable: "This is a Spotify-generated or personalized playlist, and its tracks cannot currently be accessed. Please copy the tracks to a public playlist you created and try again."
   spotify_playlist_restricted: "This Spotify playlist was recognized, but Spotify prevents third-party apps from reading its tracks. This commonly affects personalized recommendations and Spotify-owned playlists. Copy the tracks to a public playlist you created, then try again."
   spotify_playlist_empty: "This Spotify playlist currently has no playable tracks."
   spotify_playlist_auth_failed: "Spotify authentication failed, so the playlist cannot be read right now."

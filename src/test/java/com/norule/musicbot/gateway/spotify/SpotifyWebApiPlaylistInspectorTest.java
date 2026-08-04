@@ -93,6 +93,23 @@ class SpotifyWebApiPlaylistInspectorTest {
 
         assertEquals(SpotifyPlaylistInspector.Outcome.SPOTIFY_RESTRICTED_OR_PERSONALIZED,
                 result.outcome());
+        assertEquals(404, result.statusCode());
+    }
+
+    @Test
+    void preservesMetadata404StatusForLoadFailureContext() {
+        ScenarioTransport transport = new ScenarioTransport(
+                404,
+                spotifyError(404, "Resource not found"),
+                200,
+                READABLE_ITEMS
+        );
+
+        SpotifyPlaylistInspector.Inspection result = inspect(transport, SPOTIFY_PLAYLIST_ID);
+
+        assertEquals(SpotifyPlaylistInspector.Outcome.UNAVAILABLE, result.outcome());
+        assertEquals(SpotifyPlaylistInspector.PlaylistClassification.UNKNOWN, result.classification());
+        assertEquals(404, result.statusCode());
     }
 
     @Test
