@@ -291,29 +291,22 @@ java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.6.jar
 prefix: "!"
 debug: false
 commandGuildId: ""
-defaultLanguage: "zh-TW"
-commandCooldownSeconds: 3
-numberChainReactionDelayMillis: 500
 
 data:
   guildSettingsDir: "guild/configs"
   languageDir: "lang"
-  cacheDir: "cache"
   musicDir: "guild/music"
   moderationDir: "guild/moderation"
   ticketDir: "guild/tickets"
-  ticketTranscriptDir: "ticket/transcripts"
+  ticketTranscriptDir: "ticket-transcripts"
   honeypotDir: "guild/honeypot"
   logDir: "logs"
 
+defaultLanguage: "zh-TW"
+commandCooldownSeconds: 3
+numberChainReactionDelayMillis: 500
+
 music:
-  autoLeaveEnabled: true
-  autoLeaveMinutes: 5
-  autoplayEnabled: true
-  defaultRepeatMode: "OFF"
-  commandChannelId: ""
-  historyLimit: 50
-  statsRetentionDays: 0
   youtube:
     oauthEnabled: false
     oauthRefreshToken: ""
@@ -371,9 +364,11 @@ https://dash.norule.me/auth/callback
 ```yml
 web:
   enabled: true
-  host: "0.0.0.0"
-  port: 60000
-  baseUrl: "https://dash.norule.me"
+  bind:
+    host: "0.0.0.0"
+    port: 60000
+  public:
+    baseUrl: "https://dash.norule.me"
   discordClientId: "YOUR_CLIENT_ID"
   discordClientSecret: "YOUR_CLIENT_SECRET"
   discordRedirectUri: "https://dash.norule.me/auth/callback"
@@ -392,15 +387,14 @@ https://dash.norule.me
 ```yml
 shortUrl:
   enabled: true
-  host: "0.0.0.0"
-  port: 60001
-  domain: "s.norule.me"
+  bindHost: "0.0.0.0"
+  bindPort: 60001
   publicBaseUrl: "https://s.norule.me"
   codeLength: 7
-  dedupeEnabled: true
+  allowPrivateTargets: false
+  dedupe: true
   ttlDays: 7
   cleanupIntervalMinutes: 10
-  allowPrivateTargets: false
 ```
 
 使用方式：
@@ -427,26 +421,26 @@ minecraftStatus:
   internalCacheSeconds: 60
 ```
 
-## 統計資料儲存設定
+## 共用資料庫設定
 
-統計資料可依需求使用 SQLite 或 MySQL。
+統計與短網址資料共用 `database` 設定，可依需求使用 SQLite 或 MySQL。
 
 SQLite 範例：
 
 ```yml
-stats:
+database:
   storage: "sqlite"
   sqlite:
-    path: "data/message-stats.db"
+    path: "data/norule.db"
 ```
 
 MySQL 範例：
 
 ```yml
-stats:
+database:
   storage: "mysql"
   mysql:
-    jdbcUrl: "jdbc:mysql://localhost:3306/discord_bot?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    jdbcUrl: "jdbc:mysql://localhost:3306/data?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
     username: "root"
     password: ""
     poolSize: 8

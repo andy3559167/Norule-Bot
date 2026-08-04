@@ -23,7 +23,6 @@ commandGuildId: ""
 data:
   guildSettingsDir: "guild/configs"
   languageDir: "lang"
-  cacheDir: "cache"
   musicDir: "guild/music"
   moderationDir: "guild/moderation"
   ticketDir: "guild/tickets"
@@ -81,6 +80,8 @@ music:
     countryCode: "TW"
     preferAnonymousToken: true
     customTokenEndpoint: ""
+    playlistMaxTracks: 50
+    playlistLoadCooldownSeconds: 60
   audio:
     direct-http:
       enabled: false
@@ -128,9 +129,6 @@ database:
   sqlite:
     path: "data/norule.db"
 
-# Stats advanced settings (reserved)
-stats: {}
-
 # Short URL service
 shortUrl:
   enabled: false
@@ -149,6 +147,7 @@ shortUrl:
     maxFileSizeMb: 20
     maxVideoFileSizeMb: 100
     maxVideoDurationSeconds: 300
+    expiredShareRetentionDays: 30
     storagePath: "data/short-url-images"
 
 # Minecraft status query settings

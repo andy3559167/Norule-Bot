@@ -277,6 +277,9 @@ public final class ConfigInitializer {
             } else if (trimmed.startsWith("debug:")) {
                 out.add("");
                 out.add("# Enable debug logging");
+            } else if ("runtime-dependencies:".equals(trimmed)) {
+                out.add("");
+                out.add("# Runtime dependency bootstrap download behavior");
             } else if (trimmed.startsWith("commandGuildId:")) {
                 out.add("");
                 out.add("# Restrict slash command registration to a guild ID (empty = global)");
@@ -315,9 +318,6 @@ public final class ConfigInitializer {
             } else if ("database:".equals(trimmed)) {
                 out.add("");
                 out.add("# Shared database settings");
-            } else if ("stats:".equals(trimmed)) {
-                out.add("");
-                out.add("# Stats advanced settings (reserved)");
             } else if ("shortUrl:".equals(trimmed)) {
                 out.add("");
                 out.add("# Short URL service");
@@ -376,7 +376,7 @@ public final class ConfigInitializer {
     }
 
     private boolean migrateLegacyConfig(Map<String, Object> config) {
-        boolean changed = false;
+        boolean changed = migrateDataPathKeys(config);
 
         Map<String, Object> web = mutableMap(config.get("web"));
         if (web != null && !web.isEmpty()) {
@@ -524,6 +524,9 @@ public final class ConfigInitializer {
             changed |= removeKey(stats, "storage");
             changed |= removeKey(stats, "mysql");
             changed |= removeKey(stats, "sqlite");
+            if (stats.isEmpty()) {
+                changed |= removeKey(config, "stats");
+            }
         }
         if (shortUrl != null) {
             changed |= removeKey(shortUrl, "storage");
@@ -531,6 +534,40 @@ public final class ConfigInitializer {
             changed |= removeKey(shortUrl, "sqlite");
         }
 
+        return changed;
+    }
+
+    private boolean migrateDataPathKeys(Map<String, Object> config) {
+        Map<String, Object> data = mutableMap(config.get("data"));
+        boolean changed = false;
+
+        for (String key : List.of(
+                "guildSettingsDir",
+                "languageDir",
+                "musicDir",
+                "moderationDir",
+                "ticketDir",
+                "ticketTranscriptDir",
+                "honeypotDir",
+                "logDir"
+        )) {
+            if (!config.containsKey(key)) {
+                continue;
+            }
+            if (data == null) {
+                data = new LinkedHashMap<>();
+                config.put("data", data);
+            }
+            if (!data.containsKey(key)) {
+                data.put(key, config.get(key));
+            }
+            changed |= removeKey(config, key);
+        }
+
+        changed |= removeKey(config, "cacheDir");
+        if (data != null) {
+            changed |= removeKey(data, "cacheDir");
+        }
         return changed;
     }
 
@@ -586,6 +623,8 @@ public final class ConfigInitializer {
                 changed = true;
             }
         }
+        changed |= removeKey(shortUrl, "bind");
+        changed |= removeKey(shortUrl, "public");
         return changed;
     }
 
@@ -600,28 +639,23 @@ public final class ConfigInitializer {
         }
 
         Map<String, Object> bind = mutableMap(section.get("bind"));
-        if (bind == null) {
+        boolean hasLegacyBind = section.containsKey(legacyHostKey) || section.containsKey(legacyPortKey);
+        if (bind == null && hasLegacyBind) {
             bind = new LinkedHashMap<>();
             section.put("bind", bind);
             changed = true;
         }
-        if (!bind.containsKey("host") && section.containsKey(legacyHostKey)) {
+        if (bind != null && !bind.containsKey("host") && section.containsKey(legacyHostKey)) {
             bind.put("host", section.get(legacyHostKey));
             changed = true;
         }
-        if (!bind.containsKey("port") && section.containsKey(legacyPortKey)) {
+        if (bind != null && !bind.containsKey("port") && section.containsKey(legacyPortKey)) {
             bind.put("port", section.get(legacyPortKey));
             changed = true;
         }
 
         Map<String, Object> publicMap = mutableMap(section.get("public"));
-        if (publicMap == null) {
-            publicMap = new LinkedHashMap<>();
-            section.put("public", publicMap);
-            changed = true;
-        }
-
-        String existingPublicBaseUrl = getString(publicMap, "baseUrl", "");
+        String existingPublicBaseUrl = getString(publicMap == null ? Map.of() : publicMap, "baseUrl", "");
         if (existingPublicBaseUrl.isBlank()) {
             String fallback = getString(section, legacyBaseUrlKey, "");
             if (fallback.isBlank() && legacyDomainKey != null && !legacyDomainKey.isBlank()) {
@@ -631,6 +665,11 @@ public final class ConfigInitializer {
                 }
             }
             if (!fallback.isBlank()) {
+                if (publicMap == null) {
+                    publicMap = new LinkedHashMap<>();
+                    section.put("public", publicMap);
+                    changed = true;
+                }
                 publicMap.put("baseUrl", fallback);
                 changed = true;
             }
