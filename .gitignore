@@ -17,6 +17,7 @@ target/
 /ticket-transcripts/
 /cache/
 /lib/
+/runtime-libs/
 /LOG/
 /certs/
 /guild/

@@ -253,10 +253,18 @@ mvn clean package -DskipTests -Pweb-build
 
 ```text
 target/discord-music-bot-1.6.jar
-lib/
+runtime-libs/
 ```
 
-目前專案採用「主程式 jar + 外部 lib 依賴」模式，Maven 會在打包時將 runtime 依賴複製到 `lib/`。
+目前專案採用「主程式 jar + 專用 runtime 依賴目錄」模式，Maven 會在打包時將 runtime 依賴複製到 `runtime-libs/`。啟動器會先依內建清單與 SHA-256 校驗碼同步這個目錄，完成後才建立包含 runtime 依賴的子 JVM classpath；其他用途的檔案請勿放入此目錄。
+
+可用 JVM property 調整同步行為：
+
+- `-Dnorule.bootstrap.cleanup-obsolete=true|false`：是否刪除不在目前依賴清單內的 JAR，預設 `true`。
+- `-Dnorule.bootstrap.verify-checksums=true|false`：是否驗證 SHA-256，預設 `true`。
+- `-Dnorule.bootstrap.force-redownload=true|false`：是否強制重新下載所有 runtime JAR，預設 `false`。
+
+衝突的 SLF4J Provider 與非目前版本的 Logback JAR 屬於啟動安全限制，即使關閉一般 obsolete 清理仍會移除；`runtime-libs/` 內的非 JAR 檔案不會被清理。
 
 ### 首次啟動
 
