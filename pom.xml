@@ -34,12 +34,41 @@
 
     <repositories>
         <repository>
+            <id>central</id>
+            <name>Maven Central</name>
+            <url>https://repo.maven.apache.org/maven2</url>
+            <releases>
+                <enabled>true</enabled>
+                <checksumPolicy>fail</checksumPolicy>
+                <updatePolicy>never</updatePolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
+        </repository>
+        <repository>
             <id>lavalink-releases</id>
+            <name>Lavalink Releases</name>
             <url>https://maven.lavalink.dev/releases</url>
+            <releases>
+                <enabled>true</enabled>
+                <checksumPolicy>fail</checksumPolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
         </repository>
         <repository>
             <id>topiwtf-releases</id>
+            <name>Topi Releases</name>
             <url>https://maven.topi.wtf/releases</url>
+            <releases>
+                <enabled>true</enabled>
+                <checksumPolicy>fail</checksumPolicy>
+            </releases>
+            <snapshots>
+                <enabled>false</enabled>
+            </snapshots>
         </repository>
     </repositories>
 
@@ -202,42 +231,9 @@
                         </goals>
                         <configuration>
                             <includeScope>runtime</includeScope>
-                            <outputFile>${project.build.outputDirectory}/bootstrap/runtime-dependencies.txt</outputFile>
+                            <outputAbsoluteArtifactFilename>true</outputAbsoluteArtifactFilename>
+                            <outputFile>${project.build.directory}/runtime-dependencies.list</outputFile>
                             <appendOutput>false</appendOutput>
-                        </configuration>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-antrun-plugin</artifactId>
-                <version>3.1.0</version>
-                <executions>
-                    <execution>
-                        <id>write-runtime-dependency-checksums</id>
-                        <phase>prepare-package</phase>
-                        <goals>
-                            <goal>run</goal>
-                        </goals>
-                        <configuration>
-                            <target>
-                                <mkdir dir="${project.build.directory}/runtime-dependency-checksums"/>
-                                <mkdir dir="${project.build.outputDirectory}/bootstrap"/>
-                                <checksum algorithm="SHA-256"
-                                          fileext=".sha256"
-                                          forceOverwrite="true"
-                                          format="MD5SUM"
-                                          todir="${project.build.directory}/runtime-dependency-checksums">
-                                    <fileset dir="${external.lib.dir}" includes="*.jar"/>
-                                </checksum>
-                                <concat destfile="${project.build.outputDirectory}/bootstrap/runtime-dependency-checksums.txt"
-                                        overwrite="true"
-                                        fixlastline="yes">
-                                    <fileset dir="${project.build.directory}/runtime-dependency-checksums"
-                                             includes="*.sha256"/>
-                                </concat>
-                                <delete dir="${project.build.directory}/runtime-dependency-checksums"/>
-                            </target>
                         </configuration>
                     </execution>
                 </executions>
@@ -249,6 +245,24 @@
                 <configuration>
                     <mainClass>com.norule.musicbot.bootstrap.Main</mainClass>
                 </configuration>
+                <executions>
+                    <execution>
+                        <id>write-runtime-dependency-manifest</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>com.norule.musicbot.bootstrap.RuntimeDependencyManifestGenerator</mainClass>
+                            <arguments>
+                                <argument>${project.build.directory}/runtime-dependencies.list</argument>
+                                <argument>${external.lib.dir}</argument>
+                                <argument>${project.build.outputDirectory}/bootstrap/runtime-dependencies.txt</argument>
+                                <argument>${project.build.outputDirectory}/bootstrap/runtime-dependency-checksums.txt</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
                     <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

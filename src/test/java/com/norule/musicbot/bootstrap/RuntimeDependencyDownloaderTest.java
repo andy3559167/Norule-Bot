@@ -31,9 +31,10 @@ class RuntimeDependencyDownloaderTest {
     @Test
     void formatsPercentageWhenContentLengthIsKnown() {
         String message = RuntimeDependencyDownloader.formatProgress(
-                12, 58, "file.jar", 5_000L, 20_000L, 2_000.0, 2.5);
+                12, 58, "file.jar", "central", 5_000L, 20_000L, 2_000.0, 2.5);
 
         assertTrue(message.contains("12/58"));
+        assertTrue(message.contains("repository=central"));
         assertTrue(message.contains("downloaded=5000 bytes"));
         assertTrue(message.contains("total=20000 bytes"));
         assertTrue(message.contains("progress=25.0%"));
@@ -45,7 +46,7 @@ class RuntimeDependencyDownloaderTest {
     @Test
     void omitsPercentageAndEtaWhenContentLengthIsUnknown() {
         String message = RuntimeDependencyDownloader.formatProgress(
-                3, 58, "file.jar", 5_000L, -1L, 2_000.0, 2.5);
+                3, 58, "file.jar", "lavalink-releases", 5_000L, -1L, 2_000.0, 2.5);
 
         assertTrue(message.contains("downloaded=5000 bytes"));
         assertTrue(message.contains("speed="));
@@ -61,7 +62,7 @@ class RuntimeDependencyDownloaderTest {
         List<String> messages = new ArrayList<>();
         RuntimeDependencyDownloader.DownloadProgressReporter reporter =
                 new RuntimeDependencyDownloader.DownloadProgressReporter(
-                        true, 2_000, 1, 1, "file.jar", 10_000L, 0L, clock::get, messages::add);
+                        true, 2_000, 1, 1, "file.jar", "central", 10_000L, 0L, clock::get, messages::add);
 
         clock.set(1_000_000_000L);
         reporter.onBytes(1_000L);
@@ -97,12 +98,13 @@ class RuntimeDependencyDownloaderTest {
             List<String> messages = new ArrayList<>();
             List<Long> retryDelays = new ArrayList<>();
             RuntimeDependencyDownloader downloader = new RuntimeDependencyDownloader(
-                    settings(50, 1), List.of(testServer.baseUrl()), messages::add, System::nanoTime,
+                    settings(50, 1), Map.of(RuntimeRepository.MAVEN_CENTRAL, testServer.baseUrl()),
+                    messages::add, System::nanoTime,
                     retryDelays::add);
             Path runtimeLibs = Files.createDirectories(tempDir.resolve("stall-runtime-libs"));
 
             RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
-                    runtimeLibs, List.of(artifact()), Map.of(), settings(50, 1), downloader);
+                    runtimeLibs, List.of(artifact()), settings(50, 1), downloader);
 
             assertEquals(2, requests.get());
             assertEquals(List.of(1_000L), retryDelays);
@@ -125,14 +127,15 @@ class RuntimeDependencyDownloaderTest {
         try (testServer) {
             List<Long> retryDelays = new ArrayList<>();
             RuntimeDependencyDownloader downloader = new RuntimeDependencyDownloader(
-                    settings(100, 2), List.of(testServer.baseUrl()), ignored -> { }, System::nanoTime,
+                    settings(100, 2), Map.of(RuntimeRepository.MAVEN_CENTRAL, testServer.baseUrl()),
+                    ignored -> { }, System::nanoTime,
                     retryDelays::add);
             Path runtimeLibs = Files.createDirectories(tempDir.resolve("failed-runtime-libs"));
             Path part = runtimeLibs.resolve("demo-2.0.0.jar.part");
 
             IOException failure = assertThrows(IOException.class,
                     () -> RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
-                            runtimeLibs, List.of(artifact()), Map.of(), settings(100, 2), downloader));
+                            runtimeLibs, List.of(artifact()), settings(100, 2), downloader));
 
             assertEquals(3, requests.get());
             assertEquals(List.of(1_000L, 2_000L), retryDelays);
@@ -146,8 +149,80 @@ class RuntimeDependencyDownloaderTest {
         }
     }
 
+    @Test
+    void manifestCentralDoesNotFallbackToLavalink() throws IOException {
+        AtomicInteger centralRequests = new AtomicInteger();
+        AtomicInteger lavalinkRequests = new AtomicInteger();
+        TestServer central = startServer(exchange -> {
+            centralRequests.incrementAndGet();
+            exchange.sendResponseHeaders(404, -1L);
+            exchange.close();
+        });
+        TestServer lavalink = startServer(exchange -> {
+            lavalinkRequests.incrementAndGet();
+            byte[] bytes = "wrong repository bytes".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        try (central; lavalink) {
+            RuntimeDependencyDownloader downloader = new RuntimeDependencyDownloader(
+                    settings(100, 0),
+                    Map.of(
+                            RuntimeRepository.MAVEN_CENTRAL, central.baseUrl(),
+                            RuntimeRepository.LAVALINK_RELEASES, lavalink.baseUrl()),
+                    ignored -> { }, System::nanoTime, ignored -> { });
+            Path runtimeLibs = Files.createDirectories(tempDir.resolve("no-fallback-runtime-libs"));
+
+            assertThrows(IOException.class, () -> RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
+                    runtimeLibs, List.of(artifact(RuntimeRepository.MAVEN_CENTRAL)), settings(100, 0), downloader));
+
+            assertEquals(1, centralRequests.get());
+            assertEquals(0, lavalinkRequests.get());
+        }
+    }
+
+    @Test
+    void manifestLavalinkDoesNotProbeCentral() throws IOException {
+        AtomicInteger centralRequests = new AtomicInteger();
+        AtomicInteger lavalinkRequests = new AtomicInteger();
+        byte[] bytes = "manifest repository bytes".getBytes(StandardCharsets.UTF_8);
+        TestServer central = startServer(exchange -> {
+            centralRequests.incrementAndGet();
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        TestServer lavalink = startServer(exchange -> {
+            lavalinkRequests.incrementAndGet();
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        try (central; lavalink) {
+            RuntimeDependencyDownloader downloader = new RuntimeDependencyDownloader(
+                    settings(100, 0),
+                    Map.of(
+                            RuntimeRepository.MAVEN_CENTRAL, central.baseUrl(),
+                            RuntimeRepository.LAVALINK_RELEASES, lavalink.baseUrl()),
+                    ignored -> { }, System::nanoTime, ignored -> { });
+            Path runtimeLibs = Files.createDirectories(tempDir.resolve("lavalink-only-runtime-libs"));
+
+            RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
+                    runtimeLibs, List.of(artifact(RuntimeRepository.LAVALINK_RELEASES)), settings(100, 0), downloader);
+
+            assertEquals(0, centralRequests.get());
+            assertEquals(1, lavalinkRequests.get());
+        }
+    }
+
     private static RuntimeDependencyBootstrap.DependencyArtifact artifact() {
-        return new RuntimeDependencyBootstrap.DependencyArtifact("org.example", "demo", "2.0.0", "");
+        return artifact(RuntimeRepository.MAVEN_CENTRAL);
+    }
+
+    private static RuntimeDependencyBootstrap.DependencyArtifact artifact(RuntimeRepository repository) {
+        return new RuntimeDependencyBootstrap.DependencyArtifact("org.example", "demo", "2.0.0", "", "jar",
+                repository, "a".repeat(64));
     }
 
     private static RuntimeDependencyBootstrap.BootstrapSettings settings(int stallTimeoutMs, int maxRetries) {

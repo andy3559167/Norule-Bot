@@ -22,13 +22,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 final class RuntimeDependencyBootstrap {
     static final String RELAUNCHED_PROPERTY = "norule.bootstrap.relaunched";
-    static final String DEPENDENCY_INDEX_RESOURCE = "/bootstrap/runtime-dependencies.txt";
-    static final String DEPENDENCY_CHECKSUM_RESOURCE = "/bootstrap/runtime-dependency-checksums.txt";
+    static final String DEPENDENCY_MANIFEST_RESOURCE = "/bootstrap/runtime-dependencies.txt";
     static final String CLEANUP_OBSOLETE_PROPERTY = "norule.bootstrap.cleanup-obsolete";
     static final String VERIFY_CHECKSUMS_PROPERTY = "norule.bootstrap.verify-checksums";
     static final String FORCE_REDOWNLOAD_PROPERTY = "norule.bootstrap.force-redownload";
@@ -41,19 +38,12 @@ final class RuntimeDependencyBootstrap {
     static final String RUNTIME_LIB_DIRECTORY = "runtime-libs";
     private static final String ENABLE_NATIVE_ACCESS_ARG = "--enable-native-access=ALL-UNNAMED";
     private static final String SHA_256 = "SHA-256";
-    private static final Pattern CHECKSUM_LINE = Pattern.compile("^([0-9a-fA-F]{64})\\s+[* ]?(.+)$");
     private static final System.Logger LOGGER = System.getLogger(RuntimeDependencyBootstrap.class.getName());
 
     private static final Set<String> CONFLICTING_SLF4J_PROVIDERS = Set.of(
             "slf4j-simple",
             "log4j-slf4j2-impl",
             "slf4j-reload4j"
-    );
-
-    private static final List<String> REMOTE_REPOSITORIES = List.of(
-            "https://repo.maven.apache.org/maven2",
-            "https://maven.lavalink.dev/releases",
-            "https://maven.topi.wtf/releases"
     );
 
     private RuntimeDependencyBootstrap() {
@@ -70,9 +60,9 @@ final class RuntimeDependencyBootstrap {
             return;
         }
 
-        List<DependencyArtifact> artifacts = loadRuntimeDependencies();
+        List<DependencyArtifact> artifacts = loadRuntimeDependencyManifest();
         if (artifacts.isEmpty()) {
-            LOGGER.log(System.Logger.Level.INFO, "[NoRule] Runtime dependency index is empty, skip lib bootstrap.");
+            LOGGER.log(System.Logger.Level.INFO, "[NoRule] Runtime dependency manifest is empty, skip lib bootstrap.");
             return;
         }
 
@@ -80,9 +70,8 @@ final class RuntimeDependencyBootstrap {
         Path libDir = workingDir.resolve(RUNTIME_LIB_DIRECTORY);
         try {
             BootstrapSettings settings = BootstrapSettings.fromConfig(workingDir.resolve("config.yml"));
-            Map<String, String> checksums = loadRuntimeDependencyChecksums();
-            synchronizeRuntimeDependencies(libDir, artifacts, checksums, settings,
-                    new RuntimeDependencyDownloader(settings, REMOTE_REPOSITORIES,
+            synchronizeRuntimeDependencies(libDir, artifacts, settings,
+                    new RuntimeDependencyDownloader(settings,
                             message -> LOGGER.log(System.Logger.Level.INFO, message)));
             int exitCode = relaunchWithLibClasspath(launcherPath, libDir, args);
             System.exit(exitCode);
@@ -94,13 +83,16 @@ final class RuntimeDependencyBootstrap {
         }
     }
 
-    static List<DependencyArtifact> parseDependencyLines(List<String> lines) {
+    static List<DependencyArtifact> parseManifestLines(List<String> lines) {
         Map<String, DependencyArtifact> unique = new LinkedHashMap<>();
         for (String line : lines) {
-            // S135: extracted parseDependencyLine helper to eliminate multiple continues
-            DependencyArtifact artifact = parseDependencyLine(line);
-            if (artifact != null) {
-                unique.putIfAbsent(buildJarFileName(artifact), artifact);
+            if (line == null || line.isBlank() || line.stripLeading().startsWith("#")) {
+                continue;
+            }
+            DependencyArtifact artifact = parseManifestLine(line.trim());
+            String fileName = buildJarFileName(artifact);
+            if (unique.putIfAbsent(fileName, artifact) != null) {
+                throw new IllegalArgumentException("Duplicate runtime dependency target file: " + fileName);
             }
         }
         return new ArrayList<>(unique.values());
@@ -108,115 +100,77 @@ final class RuntimeDependencyBootstrap {
 
     static String buildJarFileName(DependencyArtifact artifact) {
         if (artifact.classifier() == null || artifact.classifier().isBlank()) {
-            return artifact.artifactId() + "-" + artifact.version() + ".jar";
+            return artifact.artifactId() + "-" + artifact.version() + "." + artifact.extension();
         }
-        return artifact.artifactId() + "-" + artifact.version() + "-" + artifact.classifier() + ".jar";
+        return artifact.artifactId() + "-" + artifact.version() + "-" + artifact.classifier()
+                + "." + artifact.extension();
     }
 
-    static Map<String, String> parseChecksumLines(List<String> lines) {
-        Map<String, String> checksums = new LinkedHashMap<>();
-        for (String line : lines) {
-            if (line == null) {
-                continue;
-            }
-            Matcher matcher = CHECKSUM_LINE.matcher(line.trim());
-            if (!matcher.matches()) {
-                continue;
-            }
-            String fileName = Path.of(matcher.group(2).trim()).getFileName().toString();
-            if (isJarFileName(fileName)) {
-                checksums.put(fileName, matcher.group(1).toLowerCase(Locale.ROOT));
-            }
+    private static DependencyArtifact parseManifestLine(String line) {
+        String[] parts = line.split("\\|", -1);
+        if (parts.length != 7) {
+            throw new IllegalArgumentException("Invalid runtime dependency manifest entry; expected repository and "
+                    + "SHA-256 fields: " + line);
         }
-        return checksums;
+        String groupId = requireManifestValue(parts[0], "groupId", line);
+        String artifactId = requireManifestValue(parts[1], "artifactId", line);
+        String version = requireManifestValue(parts[2], "version", line);
+        String classifier = parts[3].trim();
+        String extension = requireManifestValue(parts[4], "extension", line).toLowerCase(Locale.ROOT);
+        if (!"jar".equals(extension)) {
+            throw new IllegalArgumentException("Unsupported runtime dependency extension '" + extension + "': "
+                    + line);
+        }
+        RuntimeRepository repository = RuntimeRepository.fromId(requireManifestValue(parts[5], "repository", line));
+        String sha256 = requireManifestValue(parts[6], "sha256", line).toLowerCase(Locale.ROOT);
+        if (!isSha256(sha256)) {
+            throw new IllegalArgumentException("Invalid SHA-256 in runtime dependency manifest: " + line);
+        }
+        return new DependencyArtifact(groupId, artifactId, version, classifier, extension, repository, sha256);
     }
 
-    // S135: helper extracted from parseDependencyLines to replace the 3-continue loop
-    private static DependencyArtifact parseDependencyLine(String line) {
-        if (line == null) {
-            return null;
+    private static String requireManifestValue(String value, String field, String line) {
+        String trimmed = value.trim();
+        if (trimmed.isBlank()) {
+            throw new IllegalArgumentException("Missing " + field + " in runtime dependency manifest: " + line);
         }
-        String trimmed = stripAnsi(line).trim();
-        if (trimmed.isBlank() || !trimmed.contains(":")) {
-            return null;
-        }
-        return parseLine(trimmed);
+        return trimmed;
     }
 
-    private static List<DependencyArtifact> loadRuntimeDependencies() {
-        InputStream input = RuntimeDependencyBootstrap.class.getResourceAsStream(DEPENDENCY_INDEX_RESOURCE);
+    private static List<DependencyArtifact> loadRuntimeDependencyManifest() {
+        InputStream input = RuntimeDependencyBootstrap.class.getResourceAsStream(DEPENDENCY_MANIFEST_RESOURCE);
         if (input == null) {
             return List.of();
         }
         try (input) {
             List<String> lines = new String(input.readAllBytes(), StandardCharsets.UTF_8).lines().toList();
-            return parseDependencyLines(lines);
+            return parseManifestLines(lines);
         } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read runtime dependency index: " + DEPENDENCY_INDEX_RESOURCE, e);
+            throw new UncheckedIOException("Failed to read runtime dependency manifest: "
+                    + DEPENDENCY_MANIFEST_RESOURCE, e);
         }
-    }
-
-    private static Map<String, String> loadRuntimeDependencyChecksums() {
-        InputStream input = RuntimeDependencyBootstrap.class.getResourceAsStream(DEPENDENCY_CHECKSUM_RESOURCE);
-        if (input == null) {
-            return Map.of();
-        }
-        try (input) {
-            List<String> lines = new String(input.readAllBytes(), StandardCharsets.UTF_8).lines().toList();
-            return parseChecksumLines(lines);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to read runtime dependency checksums: "
-                    + DEPENDENCY_CHECKSUM_RESOURCE, e);
-        }
-    }
-
-    private static DependencyArtifact parseLine(String line) {
-        String[] parts = line.split(":");
-        if (parts.length == 5) {
-            String groupId = parts[0].trim();
-            String artifactId = parts[1].trim();
-            String type = parts[2].trim();
-            String version = parts[3].trim();
-            if (!"jar".equalsIgnoreCase(type) || groupId.isBlank() || artifactId.isBlank() || version.isBlank()) {
-                return null;
-            }
-            return new DependencyArtifact(groupId, artifactId, version, "");
-        }
-        if (parts.length == 6) {
-            String groupId = parts[0].trim();
-            String artifactId = parts[1].trim();
-            String type = parts[2].trim();
-            String classifier = parts[3].trim();
-            String version = parts[4].trim();
-            if (!"jar".equalsIgnoreCase(type) || groupId.isBlank() || artifactId.isBlank() || version.isBlank()) {
-                return null;
-            }
-            return new DependencyArtifact(groupId, artifactId, version, classifier);
-        }
-        return null;
     }
 
     static void synchronizeRuntimeDependencies(Path libDir, List<DependencyArtifact> artifacts,
-            Map<String, String> checksums, BootstrapSettings settings, ArtifactDownloader downloader) throws IOException {
-        synchronizeRuntimeDependencies(libDir, artifacts, checksums, settings,
+            BootstrapSettings settings, ArtifactDownloader downloader) throws IOException {
+        synchronizeRuntimeDependencies(libDir, artifacts, settings,
                 (artifact, destination, index, total) -> downloader.download(artifact, destination));
     }
 
     static void synchronizeRuntimeDependencies(Path libDir, List<DependencyArtifact> artifacts,
-            Map<String, String> checksums, BootstrapSettings settings, ProgressArtifactDownloader downloader)
-            throws IOException {
+            BootstrapSettings settings, ProgressArtifactDownloader downloader) throws IOException {
         List<DependencyArtifact> activeArtifacts = removeConflictingProviders(artifacts);
         validateLogbackVersions(activeArtifacts);
-        validateChecksums(activeArtifacts, checksums, settings);
+        validateChecksums(activeArtifacts, settings);
         Files.createDirectories(libDir);
 
         SyncStats stats = new SyncStats(activeArtifacts.size(), System.nanoTime());
         LOGGER.log(System.Logger.Level.INFO,
                 "[NoRule] Preparing runtime dependencies: total=" + activeArtifacts.size());
         try {
-            downloadRequiredArtifacts(libDir, activeArtifacts, checksums, settings, downloader, stats);
+            downloadRequiredArtifacts(libDir, activeArtifacts, settings, downloader, stats);
             stats.removed = cleanupRuntimeJars(libDir, activeArtifacts, settings.cleanupObsolete());
-            verifySynchronizedArtifacts(libDir, activeArtifacts, checksums, settings);
+            verifySynchronizedArtifacts(libDir, activeArtifacts, settings);
         } catch (IOException e) {
             logSummary(stats);
             throw e;
@@ -260,15 +214,15 @@ final class RuntimeDependencyBootstrap {
         return versions;
     }
 
-    private static void validateChecksums(List<DependencyArtifact> artifacts, Map<String, String> checksums,
-            BootstrapSettings settings) throws IOException {
+    private static void validateChecksums(List<DependencyArtifact> artifacts, BootstrapSettings settings)
+            throws IOException {
         if (!settings.verifyChecksums()) {
             return;
         }
         List<String> missing = new ArrayList<>();
         for (DependencyArtifact artifact : artifacts) {
             String fileName = buildJarFileName(artifact);
-            if (!isSha256(checksums.get(fileName))) {
+            if (!isSha256(artifact.sha256())) {
                 missing.add(fileName);
             }
         }
@@ -278,33 +232,44 @@ final class RuntimeDependencyBootstrap {
     }
 
     private static void downloadRequiredArtifacts(Path libDir, List<DependencyArtifact> artifacts,
-            Map<String, String> checksums, BootstrapSettings settings, ProgressArtifactDownloader downloader,
-            SyncStats stats) throws IOException {
+            BootstrapSettings settings, ProgressArtifactDownloader downloader, SyncStats stats) throws IOException {
         for (int artifactIndex = 0; artifactIndex < artifacts.size(); artifactIndex++) {
             DependencyArtifact artifact = artifacts.get(artifactIndex);
             int displayIndex = artifactIndex + 1;
             String fileName = buildJarFileName(artifact);
             Path target = libDir.resolve(fileName);
-            if (!requiresDownload(target, checksums.get(fileName), settings)) {
+            if (!requiresDownload(target, artifact.sha256(), settings)) {
                 Files.deleteIfExists(partFile(target));
                 stats.reused++;
                 continue;
             }
+            logReplacementIfNeeded(target, artifact, settings);
             long startedAt = System.nanoTime();
             try {
-                long size = downloadAndReplace(artifact, target, checksums.get(fileName), settings.verifyChecksums(),
+                long size = downloadAndReplace(artifact, target, artifact.sha256(), settings.verifyChecksums(),
                         downloader, displayIndex, artifacts.size());
                 stats.downloaded++;
                 stats.totalBytes += size;
                 LOGGER.log(System.Logger.Level.INFO, String.format(Locale.ROOT,
-                        "[NoRule] Downloaded %d/%d: %s size=%.1f MB duration=%.1fs",
-                        displayIndex, artifacts.size(), fileName, bytesToMegabytes(size),
+                        "[NoRule] Downloaded %d/%d: %s repository=%s size=%.1f MB duration=%.1fs",
+                        displayIndex, artifacts.size(), fileName, artifact.repository().id(), bytesToMegabytes(size),
                         elapsedSeconds(startedAt, System.nanoTime())));
             } catch (IOException e) {
                 stats.failed++;
                 throw e;
             }
         }
+    }
+
+    private static void logReplacementIfNeeded(Path target, DependencyArtifact artifact, BootstrapSettings settings)
+            throws IOException {
+        if (!settings.verifyChecksums() || !Files.isRegularFile(target)
+                || artifact.sha256().equals(sha256(target))) {
+            return;
+        }
+        LOGGER.log(System.Logger.Level.INFO,
+                "[NoRule] Replacing runtime dependency with " + artifact.repository().id() + " version: "
+                        + target.getFileName());
     }
 
     private static boolean requiresDownload(Path target, String expectedChecksum, BootstrapSettings settings)
@@ -384,14 +349,14 @@ final class RuntimeDependencyBootstrap {
     }
 
     private static void verifySynchronizedArtifacts(Path libDir, List<DependencyArtifact> artifacts,
-            Map<String, String> checksums, BootstrapSettings settings) throws IOException {
+            BootstrapSettings settings) throws IOException {
         for (DependencyArtifact artifact : artifacts) {
             String fileName = buildJarFileName(artifact);
             Path target = libDir.resolve(fileName);
             if (!Files.isRegularFile(target)) {
                 throw new IOException("Runtime dependency is missing after synchronization: " + fileName);
             }
-            if (settings.verifyChecksums() && !checksums.get(fileName).equals(sha256(target))) {
+            if (settings.verifyChecksums() && !artifact.sha256().equals(sha256(target))) {
                 throw new IOException("Runtime dependency checksum failed after synchronization: " + fileName);
             }
         }
@@ -466,12 +431,6 @@ final class RuntimeDependencyBootstrap {
             return value.substring(0, value.length() - 1);
         }
         return value;
-    }
-
-    private static String stripAnsi(String value) {
-        return value
-                .replaceAll("\\u001B\\[[;\\d]*m", "")
-                .replaceAll("[\\p{Cntrl}&&[^\\r\\n\\t]]", "");
     }
 
     private static String sha256(Path file) throws IOException {
@@ -550,7 +509,8 @@ final class RuntimeDependencyBootstrap {
                 elapsedSeconds(stats.startedAtNanos, System.nanoTime())));
     }
 
-    record DependencyArtifact(String groupId, String artifactId, String version, String classifier) {
+    record DependencyArtifact(String groupId, String artifactId, String version, String classifier, String extension,
+            RuntimeRepository repository, String sha256) {
     }
 
     record BootstrapSettings(boolean cleanupObsolete, boolean verifyChecksums, boolean forceRedownload,

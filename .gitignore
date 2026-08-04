@@ -24,6 +24,7 @@ target/
 /docs/
 /ticket/
 .m2/
+.m2-clean/
 tmp-settings.xml
 config.backup-*.yml
 

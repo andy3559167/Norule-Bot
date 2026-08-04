@@ -9,8 +9,9 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.List;
+import java.util.EnumMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -22,20 +23,20 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
     private static final long MAX_RETRY_DELAY_MS = 30_000L;
 
     private final RuntimeDependencyBootstrap.BootstrapSettings settings;
-    private final List<String> repositories;
+    private final Map<RuntimeRepository, String> repositoryUrls;
     private final Consumer<String> output;
     private final LongSupplier nanoTime;
     private final RetrySleeper retrySleeper;
 
-    RuntimeDependencyDownloader(RuntimeDependencyBootstrap.BootstrapSettings settings, List<String> repositories,
-            Consumer<String> output) {
-        this(settings, repositories, output, System::nanoTime, Thread::sleep);
+    RuntimeDependencyDownloader(RuntimeDependencyBootstrap.BootstrapSettings settings, Consumer<String> output) {
+        this(settings, defaultRepositoryUrls(), output, System::nanoTime, Thread::sleep);
     }
 
-    RuntimeDependencyDownloader(RuntimeDependencyBootstrap.BootstrapSettings settings, List<String> repositories,
+    RuntimeDependencyDownloader(RuntimeDependencyBootstrap.BootstrapSettings settings,
+            Map<RuntimeRepository, String> repositoryUrls,
             Consumer<String> output, LongSupplier nanoTime, RetrySleeper retrySleeper) {
         this.settings = Objects.requireNonNull(settings, "settings");
-        this.repositories = List.copyOf(repositories);
+        this.repositoryUrls = Map.copyOf(repositoryUrls);
         this.output = Objects.requireNonNull(output, "output");
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         this.retrySleeper = Objects.requireNonNull(retrySleeper, "retrySleeper");
@@ -48,7 +49,7 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
         for (int attempt = 0; attempt <= settings.maxRetries(); attempt++) {
             Files.deleteIfExists(destination);
             try {
-                downloadFromRepositories(artifact, destination, index, total);
+                downloadFromManifestRepository(artifact, destination, index, total);
                 return;
             } catch (IOException e) {
                 lastFailure = e;
@@ -59,39 +60,26 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
                 int retryNumber = attempt + 1;
                 long delayMs = retryDelayMs(retryNumber);
                 output.accept(String.format(Locale.ROOT,
-                        "[NoRule] Download failed %d/%d: %s host=%s %s; retry %d/%d in %.1fs",
-                        index, total, RuntimeDependencyBootstrap.buildJarFileName(artifact), failureHost(e),
-                        failureKind(e), retryNumber, settings.maxRetries(), delayMs / 1_000.0));
+                        "[NoRule] Download failed %d/%d: %s repository=%s host=%s %s; retry %d/%d in %.1fs",
+                        index, total, RuntimeDependencyBootstrap.buildJarFileName(artifact),
+                        artifact.repository().id(), failureHost(e), failureKind(e), retryNumber, settings.maxRetries(),
+                        delayMs / 1_000.0));
                 sleepBeforeRetry(artifact, e, retryNumber, delayMs);
             }
         }
         throw terminalFailure(artifact, lastFailure, settings.maxRetries());
     }
 
-    private void downloadFromRepositories(RuntimeDependencyBootstrap.DependencyArtifact artifact, Path destination,
+    private void downloadFromManifestRepository(RuntimeDependencyBootstrap.DependencyArtifact artifact,
+            Path destination,
             int index, int total) throws IOException {
-        IOException lastFailure = null;
         String relativePath = RuntimeDependencyBootstrap.toRelativeArtifactPath(artifact);
-        for (String repository : repositories) {
-            URI uri = URI.create(RuntimeDependencyBootstrap.trimTrailingSlash(repository) + "/" + relativePath);
-            try {
-                downloadFrom(uri, destination, artifact, index, total);
-                return;
-            } catch (IOException e) {
-                lastFailure = preferredFailure(lastFailure, e);
-            }
+        String repositoryUrl = repositoryUrls.get(artifact.repository());
+        if (repositoryUrl == null || repositoryUrl.isBlank()) {
+            throw new RepositoryDownloadException("none", "RepositoryNotConfigured");
         }
-        if (lastFailure != null) {
-            throw lastFailure;
-        }
-        throw new RepositoryDownloadException("none", "NoRepositoryConfigured");
-    }
-
-    private static IOException preferredFailure(IOException current, IOException candidate) {
-        if (current instanceof StallTimeoutException && !(candidate instanceof StallTimeoutException)) {
-            return current;
-        }
-        return candidate;
+        URI uri = URI.create(RuntimeDependencyBootstrap.trimTrailingSlash(repositoryUrl) + "/" + relativePath);
+        downloadFrom(uri, destination, artifact, index, total);
     }
 
     private void downloadFrom(URI uri, Path destination, RuntimeDependencyBootstrap.DependencyArtifact artifact,
@@ -136,7 +124,7 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
         long downloadedBytes = 0L;
         DownloadProgressReporter reporter = new DownloadProgressReporter(settings.progressEnabled(),
                 settings.progressIntervalMs(), index, total, RuntimeDependencyBootstrap.buildJarFileName(artifact),
-                contentLength, startedAt, nanoTime, output);
+                artifact.repository().id(), contentLength, startedAt, nanoTime, output);
         reporter.onStart();
         byte[] buffer = new byte[BUFFER_SIZE];
         while (true) {
@@ -185,7 +173,8 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
         String host = failure == null ? "unknown" : failureHost(failure);
         String kind = failure == null ? "exception=UnknownDownloadFailure" : failureKind(failure);
         return new IOException("Failed to download artifact " + RuntimeDependencyBootstrap.buildJarFileName(artifact)
-                + " host=" + host + " " + kind + " retries=" + retries + "/" + retries);
+                + " repository=" + artifact.repository().id() + " host=" + host + " " + kind
+                + " retries=" + retries + "/" + retries);
     }
 
     private static long retryDelayMs(int retryNumber) {
@@ -226,12 +215,21 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
         }
     }
 
+    private static Map<RuntimeRepository, String> defaultRepositoryUrls() {
+        Map<RuntimeRepository, String> urls = new EnumMap<>(RuntimeRepository.class);
+        for (RuntimeRepository repository : RuntimeRepository.values()) {
+            urls.put(repository, repository.baseUrl());
+        }
+        return urls;
+    }
+
     static final class DownloadProgressReporter {
         private final boolean enabled;
         private final long intervalNanos;
         private final int index;
         private final int total;
         private final String fileName;
+        private final String repositoryId;
         private final long contentLength;
         private final long startedAt;
         private final LongSupplier nanoTime;
@@ -240,12 +238,14 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
         private long lastReportedBytes;
 
         DownloadProgressReporter(boolean enabled, int intervalMs, int index, int total, String fileName,
-                long contentLength, long startedAt, LongSupplier nanoTime, Consumer<String> output) {
+                String repositoryId, long contentLength, long startedAt, LongSupplier nanoTime,
+                Consumer<String> output) {
             this.enabled = enabled;
             this.intervalNanos = intervalMs * NANOS_PER_MILLISECOND;
             this.index = index;
             this.total = total;
             this.fileName = fileName;
+            this.repositoryId = repositoryId;
             this.contentLength = contentLength;
             this.startedAt = startedAt;
             this.nanoTime = nanoTime;
@@ -255,7 +255,7 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
 
         void onStart() {
             if (enabled) {
-                output.accept(formatProgress(index, total, fileName, 0L, contentLength, 0.0, 0.0));
+                output.accept(formatProgress(index, total, fileName, repositoryId, 0L, contentLength, 0.0, 0.0));
             }
         }
 
@@ -271,17 +271,18 @@ final class RuntimeDependencyDownloader implements RuntimeDependencyBootstrap.Pr
             long intervalBytes = Math.max(0L, downloadedBytes - lastReportedBytes);
             double speed = interval <= 0L ? 0.0 : intervalBytes * (double) NANOS_PER_SECOND / interval;
             double elapsedSeconds = Math.max(0L, now - startedAt) / (double) NANOS_PER_SECOND;
-            output.accept(formatProgress(index, total, fileName, downloadedBytes, contentLength, speed,
+            output.accept(formatProgress(index, total, fileName, repositoryId, downloadedBytes, contentLength, speed,
                     elapsedSeconds));
             lastReportedAt = now;
             lastReportedBytes = downloadedBytes;
         }
     }
 
-    static String formatProgress(int index, int total, String fileName, long downloadedBytes, long contentLength,
-            double bytesPerSecond, double elapsedSeconds) {
+    static String formatProgress(int index, int total, String fileName, String repositoryId, long downloadedBytes,
+            long contentLength, double bytesPerSecond, double elapsedSeconds) {
         StringBuilder message = new StringBuilder(String.format(Locale.ROOT,
-                "[NoRule] Downloading %d/%d: %s downloaded=%d bytes", index, total, fileName, downloadedBytes));
+                "[NoRule] Downloading %d/%d: %s repository=%s downloaded=%d bytes",
+                index, total, fileName, repositoryId, downloadedBytes));
         if (contentLength >= 0L) {
             double percentage = contentLength == 0L ? 100.0
                     : Math.min(100.0, downloadedBytes * 100.0 / contentLength);

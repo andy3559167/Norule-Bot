@@ -11,7 +11,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -26,24 +25,23 @@ class RuntimeDependencyBootstrapTest {
     Path tempDir;
 
     @Test
-    void parsesRuntimeDependencyListOutput() {
-        List<RuntimeDependencyBootstrap.DependencyArtifact> artifacts = RuntimeDependencyBootstrap.parseDependencyLines(List.of(
-                "The following files have been resolved:",
-                "   net.dv8tion:JDA:jar:6.3.1:compile\u001B[36m -- module net.dv8tion.jda\u001B[0m",
-                "   org.slf4j:slf4j-simple:jar:2.0.17:compile",
-                ""
-        ));
+    void parsesRuntimeDependencyManifest() {
+        String checksum = "a".repeat(64);
+        List<RuntimeDependencyBootstrap.DependencyArtifact> artifacts = RuntimeDependencyBootstrap.parseManifestLines(
+                List.of(
+                        "# groupId|artifactId|version|classifier|extension|repository|sha256",
+                        "net.dv8tion|JDA|6.5.0||jar|central|" + checksum));
 
-        assertEquals(2, artifacts.size());
-        assertEquals("JDA-6.3.1.jar", RuntimeDependencyBootstrap.buildJarFileName(artifacts.get(0)));
-        assertEquals("slf4j-simple-2.0.17.jar", RuntimeDependencyBootstrap.buildJarFileName(artifacts.get(1)));
+        assertEquals(1, artifacts.size());
+        assertEquals("JDA-6.5.0.jar", RuntimeDependencyBootstrap.buildJarFileName(artifacts.get(0)));
+        assertEquals(RuntimeRepository.MAVEN_CENTRAL, artifacts.get(0).repository());
+        assertEquals(checksum, artifacts.get(0).sha256());
     }
 
     @Test
     void supportsClassifierCoordinates() {
-        List<RuntimeDependencyBootstrap.DependencyArtifact> artifacts = RuntimeDependencyBootstrap.parseDependencyLines(List.of(
-                "   org.example:demo:jar:linux-x86_64:1.0.0:runtime"
-        ));
+        List<RuntimeDependencyBootstrap.DependencyArtifact> artifacts = RuntimeDependencyBootstrap.parseManifestLines(
+                List.of("org.example|demo|1.0.0|linux-x86_64|jar|lavalink-releases|" + "b".repeat(64)));
 
         assertEquals(1, artifacts.size());
         assertEquals("demo-1.0.0-linux-x86_64.jar", RuntimeDependencyBootstrap.buildJarFileName(artifacts.get(0)));
@@ -51,26 +49,28 @@ class RuntimeDependencyBootstrapTest {
 
     @Test
     void deduplicatesByTargetJarFileName() {
-        List<RuntimeDependencyBootstrap.DependencyArtifact> artifacts = RuntimeDependencyBootstrap.parseDependencyLines(List.of(
-                "   org.slf4j:slf4j-api:jar:2.0.17:compile",
-                "   org.slf4j:slf4j-api:jar:2.0.17:runtime"
-        ));
-
-        assertEquals(1, artifacts.size());
-        assertEquals("slf4j-api-2.0.17.jar", RuntimeDependencyBootstrap.buildJarFileName(artifacts.get(0)));
+        String checksum = "c".repeat(64);
+        assertThrows(IllegalArgumentException.class, () -> RuntimeDependencyBootstrap.parseManifestLines(List.of(
+                "org.slf4j|slf4j-api|2.0.17||jar|central|" + checksum,
+                "org.slf4j|slf4j-api|2.0.17||jar|central|" + checksum)));
     }
 
     @Test
-    void parsesSha256ChecksumManifest() {
-        String checksum = "a".repeat(64);
+    void rejectsManifestWithoutRepository() {
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> RuntimeDependencyBootstrap.parseManifestLines(
+                        List.of("org.example|demo|1.0.0||jar|" + "a".repeat(64))));
 
-        Map<String, String> checksums = RuntimeDependencyBootstrap.parseChecksumLines(List.of(
-                checksum + " *demo-1.0.0.jar",
-                "not a checksum",
-                "b".repeat(64) + " *notes.txt"
-        ));
+        assertTrue(failure.getMessage().contains("expected repository"));
+    }
 
-        assertEquals(Map.of("demo-1.0.0.jar", checksum), checksums);
+    @Test
+    void rejectsUnknownManifestRepository() {
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> RuntimeDependencyBootstrap.parseManifestLines(
+                        List.of("org.example|demo|1.0.0||jar|unknown|" + "a".repeat(64))));
+
+        assertTrue(failure.getMessage().contains("Unknown runtime dependency repository ID"));
     }
 
     @Test
@@ -110,7 +110,6 @@ class RuntimeDependencyBootstrapTest {
         RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
                 List.of(current),
-                Map.of(),
                 settings(true, false, false),
                 (artifact, destination) -> {
                     downloads.incrementAndGet();
@@ -132,7 +131,6 @@ class RuntimeDependencyBootstrapTest {
         RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
                 List.of(artifact("demo", "2.0.0")),
-                Map.of(),
                 settings(true, false, false),
                 RuntimeDependencyBootstrapTest::failUnexpectedDownload);
 
@@ -152,7 +150,6 @@ class RuntimeDependencyBootstrapTest {
         RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
                 List.of(artifact("demo", "2.0.0")),
-                Map.of(),
                 settings(false, false, false),
                 RuntimeDependencyBootstrapTest::failUnexpectedDownload);
 
@@ -175,7 +172,6 @@ class RuntimeDependencyBootstrapTest {
                 List.of(
                         artifact("logback-classic", "1.5.38"),
                         artifact("logback-core", "1.5.38")),
-                Map.of(),
                 settings(false, false, false),
                 RuntimeDependencyBootstrapTest::failUnexpectedDownload);
 
@@ -197,7 +193,6 @@ class RuntimeDependencyBootstrapTest {
                         List.of(
                                 artifact("logback-classic", "1.5.38"),
                                 artifact("logback-core", "1.4.14")),
-                        Map.of(),
                         settings(true, false, false),
                         RuntimeDependencyBootstrapTest::failUnexpectedDownload));
 
@@ -215,7 +210,6 @@ class RuntimeDependencyBootstrapTest {
         assertThrows(IOException.class, () -> RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
                 List.of(artifact),
-                Map.of(),
                 settings(true, false, false),
                 (ignored, destination) -> {
                     Files.writeString(destination, "partial", StandardCharsets.UTF_8);
@@ -229,16 +223,16 @@ class RuntimeDependencyBootstrapTest {
     @Test
     void redownloadsCorruptedJarAndAtomicallyReplacesIt() throws IOException {
         Path runtimeLibs = createRuntimeLibs();
-        RuntimeDependencyBootstrap.DependencyArtifact artifact = artifact("demo", "2.0.0");
         Path target = runtimeLibs.resolve("demo-2.0.0.jar");
         byte[] expectedBytes = "valid jar bytes".getBytes(StandardCharsets.UTF_8);
+        RuntimeDependencyBootstrap.DependencyArtifact artifact = artifact(
+                "demo", "2.0.0", sha256(expectedBytes));
         Files.writeString(target, "corrupted", StandardCharsets.UTF_8);
         AtomicInteger downloads = new AtomicInteger();
 
         RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
                 List.of(artifact),
-                Map.of("demo-2.0.0.jar", sha256(expectedBytes)),
                 settings(true, true, false),
                 (ignored, destination) -> {
                     downloads.incrementAndGet();
@@ -259,8 +253,7 @@ class RuntimeDependencyBootstrapTest {
 
         RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
-                List.of(artifact("demo", "2.0.0")),
-                Map.of("demo-2.0.0.jar", sha256(expectedBytes)),
+                List.of(artifact("demo", "2.0.0", sha256(expectedBytes))),
                 settings(true, true, false),
                 RuntimeDependencyBootstrapTest::failUnexpectedDownload);
 
@@ -278,7 +271,6 @@ class RuntimeDependencyBootstrapTest {
         RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
                 List.of(artifact("demo", "2.0.0")),
-                Map.of(),
                 settings(true, false, true),
                 (ignored, destination) -> {
                     downloads.incrementAndGet();
@@ -298,8 +290,7 @@ class RuntimeDependencyBootstrapTest {
 
         assertThrows(IOException.class, () -> RuntimeDependencyBootstrap.synchronizeRuntimeDependencies(
                 runtimeLibs,
-                List.of(artifact("demo", "2.0.0")),
-                Map.of("demo-2.0.0.jar", sha256(expectedBytes)),
+                List.of(artifact("demo", "2.0.0", sha256(expectedBytes))),
                 settings(true, true, false),
                 (ignored, destination) -> Files.writeString(
                         destination, "bad downloaded bytes", StandardCharsets.UTF_8)));
@@ -313,7 +304,13 @@ class RuntimeDependencyBootstrapTest {
     }
 
     private static RuntimeDependencyBootstrap.DependencyArtifact artifact(String artifactId, String version) {
-        return new RuntimeDependencyBootstrap.DependencyArtifact("org.example", artifactId, version, "");
+        return artifact(artifactId, version, "a".repeat(64));
+    }
+
+    private static RuntimeDependencyBootstrap.DependencyArtifact artifact(
+            String artifactId, String version, String checksum) {
+        return new RuntimeDependencyBootstrap.DependencyArtifact("org.example", artifactId, version, "", "jar",
+                RuntimeRepository.MAVEN_CENTRAL, checksum);
     }
 
     private static RuntimeDependencyBootstrap.BootstrapSettings settings(
