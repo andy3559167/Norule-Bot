@@ -28,6 +28,7 @@ config.backup-*.yml
 
 # Local config/secrets
 config.yml
+!src/main/resources/defaults/config.yml
 
 # OS
 .DS_Store

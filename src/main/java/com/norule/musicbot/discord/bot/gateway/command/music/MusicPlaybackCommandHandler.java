@@ -101,7 +101,7 @@ public final class MusicPlaybackCommandHandler {
             event.getHook().sendMessage(owner.i18nService().t(lang, "music.not_found", Map.of("query", ""))).queue();
             return;
         }
-        if (looksLikeUrl(query)) {
+        if (owner.musicService().isUrlLikeInput(query)) {
             directPlay(
                     event.getGuild(),
                     event.getMember(),
@@ -419,14 +419,6 @@ public final class MusicPlaybackCommandHandler {
         } catch (Exception ignored) {
             return null;
         }
-    }
-
-    private boolean looksLikeUrl(String input) {
-        if (input == null) {
-            return false;
-        }
-        String v = input.trim().toLowerCase();
-        return v.startsWith("http://") || v.startsWith("https://");
     }
 
     private String getPlayQuery(SlashCommandInteractionEvent event) {

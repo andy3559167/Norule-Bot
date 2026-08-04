@@ -51,6 +51,12 @@ public final class MusicPlaybackText {
         if ("SPOTIFY_UNSUPPORTED_LINK".equalsIgnoreCase(rawError)) {
             return i18n().t(lang, "music.spotify_unsupported_link");
         }
+        if ("SPOTIFY_SHOW_UNSUPPORTED".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.spotify_show_unsupported");
+        }
+        if ("SPOTIFY_EPISODE_UNSUPPORTED".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.spotify_episode_unsupported");
+        }
         if ("YOUTUBE_PRECHECK_BLOCKED".equalsIgnoreCase(rawError)) {
             return i18n().t(lang, "music.youtube_precheck_blocked");
         }
@@ -65,6 +71,26 @@ public final class MusicPlaybackText {
         }
         if ("YOUTUBE_PRECHECK_UNKNOWN".equalsIgnoreCase(rawError)) {
             return i18n().t(lang, "music.youtube_precheck_unknown");
+        }
+        if (rawError != null && rawError.regionMatches(true, 0, "AUDIO_", 0, "AUDIO_".length())) {
+            return i18n().t(lang, switch (rawError.toUpperCase()) {
+                case "AUDIO_INVALID_INPUT" -> "music.audio_invalid_input";
+                case "AUDIO_UNSUPPORTED_SOURCE" -> "music.audio_unsupported_source";
+                case "AUDIO_DIRECT_HTTP_DISABLED" -> "music.audio_direct_http_disabled";
+                case "AUDIO_DNS_FAILURE" -> "music.audio_dns_failure";
+                case "AUDIO_CONNECT_TIMEOUT" -> "music.audio_connect_timeout";
+                case "AUDIO_READ_TIMEOUT" -> "music.audio_read_timeout";
+                case "AUDIO_HTTP_FORBIDDEN" -> "music.audio_http_forbidden";
+                case "AUDIO_HTTP_NOT_FOUND" -> "music.audio_http_not_found";
+                case "AUDIO_HTTP_SERVER_ERROR" -> "music.audio_http_server_error";
+                case "AUDIO_UNSUPPORTED_FORMAT" -> "music.audio_unsupported_format";
+                case "AUDIO_SOURCE_RATE_LIMITED" -> "music.audio_source_rate_limited";
+                case "AUDIO_TRACK_STUCK" -> "music.audio_track_stuck";
+                case "AUDIO_TRACK_RECOVERING" -> "music.audio_track_recovering";
+                case "AUDIO_TRACK_RECOVERY_EXHAUSTED" -> "music.audio_track_recovery_exhausted";
+                case "AUDIO_TRACK_RECOVERY_FAILED" -> "music.audio_track_recovery_failed";
+                default -> "music.load_failed_generic";
+            });
         }
         return i18n().t(lang, YoutubePlaybackErrorMapper.toMessageKey(rawError));
     }

@@ -10,6 +10,7 @@ import com.sedmelluq.discord.lavaplayer.filter.AudioFilter;
 import com.sedmelluq.discord.lavaplayer.filter.ResamplingPcmAudioFilter;
 import com.sedmelluq.discord.lavaplayer.source.AudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.source.AudioSourceManagers;
+import com.sedmelluq.discord.lavaplayer.source.http.HttpAudioSourceManager;
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
@@ -30,7 +31,14 @@ import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.entities.channel.middleman.AudioChannel;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 
+import org.apache.http.ProtocolException;
+import org.apache.http.impl.client.DefaultRedirectStrategy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.UnknownHostException;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -40,6 +48,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -57,6 +66,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MusicPlayerService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(MusicPlayerService.class);
     private static final String YT_SEARCH_PREFIX = "ytsearch:";
     private static final Pattern JSON_FIELD_PATTERN_TEMPLATE = Pattern.compile("\"%s\"\\s*:\\s*\"(.*?)\"");
     private static final long SPOTIFY_RATE_LIMIT_COOLDOWN_MS = 10 * 60_000L;
@@ -66,6 +76,12 @@ public class MusicPlayerService {
     private static final String SPOTIFY_PERSONAL_PLAYLIST_ERROR_KEY = "SPOTIFY_PERSONAL_PLAYLIST_UNSUPPORTED";
     private static final String SPOTIFY_UNSUPPORTED_LINK_ERROR_KEY = "SPOTIFY_UNSUPPORTED_LINK";
     private static final String SPOTIFY_JAM_UNSUPPORTED_ERROR_KEY = "SPOTIFY_JAM_UNSUPPORTED";
+    private static final String SPOTIFY_SHOW_UNSUPPORTED_ERROR_KEY = "SPOTIFY_SHOW_UNSUPPORTED";
+    private static final String SPOTIFY_EPISODE_UNSUPPORTED_ERROR_KEY = "SPOTIFY_EPISODE_UNSUPPORTED";
+    private static final String DIRECT_HTTP_DISABLED_ERROR_KEY = "AUDIO_DIRECT_HTTP_DISABLED";
+    private static final String TRACK_RECOVERING_ERROR_KEY = "AUDIO_TRACK_RECOVERING";
+    private static final String TRACK_RECOVERY_EXHAUSTED_ERROR_KEY = "AUDIO_TRACK_RECOVERY_EXHAUSTED";
+    private static final String TRACK_RECOVERY_FAILED_ERROR_KEY = "AUDIO_TRACK_RECOVERY_FAILED";
     private static final Pattern SPOTIFY_URL_START_PATTERN = Pattern.compile(
             "(?i)https?://(?:www\\.)?open\\.spotify\\.com/"
     );
@@ -84,6 +100,9 @@ public class MusicPlayerService {
 
     private final AudioPlayerManager playerManager;
     private final MusicDataService musicDataService;
+    private final AudioInputClassifier inputClassifier = new AudioInputClassifier();
+    private final AudioLoadFailureClassifier failureClassifier = new AudioLoadFailureClassifier();
+    private final TrackRecoveryService trackRecoveryService;
     private final Map<Long, GuildMusicManager> musicManagers = new ConcurrentHashMap<>();
     private final Map<Long, Runnable> guildStateListeners = new ConcurrentHashMap<>();
     private final Map<Long, Long> lastCommandChannelByGuild = new ConcurrentHashMap<>();
@@ -94,10 +113,13 @@ public class MusicPlayerService {
     private final Map<String, CachedPlaylistTracks> youtubePlaylistCache = new ConcurrentHashMap<>();
     private volatile MusicConfig.Youtube youtubeConfig;
     private volatile MusicConfig.Spotify spotifyConfig;
+    private volatile MusicConfig.Audio audioConfig;
+    private volatile AudioUrlSafetyValidator directHttpValidator;
     private volatile int playlistTrackLimit;
     private volatile int spotifyPlaylistMaxTracks;
     private volatile long spotifyPlaylistLoadCooldownMs;
     private final boolean spotifySourceEnabled;
+    private final boolean directHttpSourceEnabled;
     private volatile BiConsumer<Long, PlaybackFailure> playbackFailureListener;
     private volatile LongPredicate autoplayEnabledChecker = guildId -> true;
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -137,7 +159,14 @@ public class MusicPlayerService {
                 sqliteDbPath
         );
         applyGlobalMusicConfig(globalMusicConfig == null ? MusicConfig.defaultValues() : globalMusicConfig);
+        MusicConfig.Audio.Recovery recoveryConfig = audioConfig.getRecovery();
+        this.trackRecoveryService = new TrackRecoveryService(
+                recoveryConfig.isEnabled(),
+                recoveryConfig.getMaxStuckRetries(),
+                recoveryConfig.getResumeRewindMillis()
+        );
         playerManager = new DefaultAudioPlayerManager();
+        playerManager.setTrackStuckThreshold(recoveryConfig.getStuckThresholdMillis());
         configureYouTubePoToken();
         YoutubeAudioSourceManager youtubeSourceManager = createYoutubeSourceManager();
         configureYouTubeOauth(youtubeSourceManager);
@@ -145,7 +174,9 @@ public class MusicPlayerService {
         this.spotifySourceEnabled = registerSpotifySourceIfConfigured();
         AudioSourceManagers.registerLocalSource(playerManager);
         AudioSourceManagers.registerRemoteSources(playerManager,
-                com.sedmelluq.discord.lavaplayer.source.youtube.YoutubeAudioSourceManager.class);
+                com.sedmelluq.discord.lavaplayer.source.youtube.YoutubeAudioSourceManager.class,
+                HttpAudioSourceManager.class);
+        this.directHttpSourceEnabled = registerDirectHttpSourceIfConfigured();
     }
 
     public void replaceGuildLimits(LongToIntFunction historyLimitProvider,
@@ -156,6 +187,13 @@ public class MusicPlayerService {
 
     public void replaceGlobalMusicConfig(MusicConfig globalMusicConfig) {
         applyGlobalMusicConfig(globalMusicConfig == null ? MusicConfig.defaultValues() : globalMusicConfig);
+        MusicConfig.Audio.Recovery recoveryConfig = audioConfig.getRecovery();
+        trackRecoveryService.updateConfig(
+                recoveryConfig.isEnabled(),
+                recoveryConfig.getMaxStuckRetries(),
+                recoveryConfig.getResumeRewindMillis()
+        );
+        playerManager.setTrackStuckThreshold(recoveryConfig.getStuckThresholdMillis());
     }
 
     public void cleanupTransientCaches(long nowMillis) {
@@ -171,9 +209,60 @@ public class MusicPlayerService {
     private void applyGlobalMusicConfig(MusicConfig config) {
         this.youtubeConfig = config.getYoutube();
         this.spotifyConfig = config.getSpotify();
+        this.audioConfig = config.getAudio();
+        this.directHttpValidator = new AudioUrlSafetyValidator(
+                Set.copyOf(this.audioConfig.getDirectHttp().getAllowedHosts()),
+                AudioUrlSafetyValidator.systemResolver()
+        );
         this.playlistTrackLimit = Math.max(1, config.getPlaylistTrackLimit());
         this.spotifyPlaylistMaxTracks = Math.max(1, this.spotifyConfig.getPlaylistMaxTracks());
         this.spotifyPlaylistLoadCooldownMs = Math.max(0L, this.spotifyConfig.getPlaylistLoadCooldownSeconds()) * 1000L;
+    }
+
+    private boolean registerDirectHttpSourceIfConfigured() {
+        MusicConfig.Audio.DirectHttp config = audioConfig.getDirectHttp();
+        if (!config.isEnabled()) {
+            LOGGER.info("[NoRule] Direct HTTP audio source disabled.");
+            return false;
+        }
+        if (config.getAllowedHosts().isEmpty()) {
+            LOGGER.warn("[NoRule] Direct HTTP audio source requested but allowedHosts is empty; source remains disabled.");
+            return false;
+        }
+        HttpAudioSourceManager sourceManager = new HttpAudioSourceManager();
+        sourceManager.configureRequests(existing -> org.apache.http.client.config.RequestConfig.copy(existing)
+                .setConnectTimeout(config.getConnectTimeoutMillis())
+                .setConnectionRequestTimeout(config.getConnectTimeoutMillis())
+                .setSocketTimeout(config.getReadTimeoutMillis())
+                .setMaxRedirects(config.getMaxRedirects())
+                .build());
+        sourceManager.configureBuilder(builder -> builder
+                .setDnsResolver(this::resolveSafeDirectHttpHost)
+                .setRedirectStrategy(new DefaultRedirectStrategy() {
+                    @Override
+                    public URI getLocationURI(org.apache.http.HttpRequest request,
+                                              org.apache.http.HttpResponse response,
+                                              org.apache.http.protocol.HttpContext context) throws ProtocolException {
+                        URI destination = super.getLocationURI(request, response, context);
+                        AudioUrlSafetyValidator.Validation validation = directHttpValidator.validateStructure(destination);
+                        if (!validation.allowed()) {
+                            throw new ProtocolException("Unsafe audio redirect blocked: " + validation.status());
+                        }
+                        return destination;
+                    }
+                }));
+        playerManager.registerSourceManager(sourceManager);
+        LOGGER.info("[NoRule] Direct HTTP audio source enabled for {} allowlisted hosts.", config.getAllowedHosts().size());
+        return true;
+    }
+
+    private InetAddress[] resolveSafeDirectHttpHost(String host) throws UnknownHostException {
+        InetAddress[] addresses = InetAddress.getAllByName(host);
+        AudioUrlSafetyValidator.Validation validation = directHttpValidator.validateResolvedHost(host, Arrays.asList(addresses));
+        if (!validation.allowed()) {
+            throw new UnknownHostException("Unsafe audio destination blocked: " + validation.status());
+        }
+        return addresses;
     }
 
     private boolean registerSpotifySourceIfConfigured() {
@@ -481,7 +570,9 @@ public class MusicPlayerService {
                     endedTrack -> handleQueueExhausted(id, endedTrack),
                     startedTrack -> handleTrackStarted(id, startedTrack),
                     finishedTrack -> handleTrackFinished(id, finishedTrack),
-                    (track, exception) -> handleTrackException(id, track, exception)
+                    (track, exception) -> handleTrackException(id, track, exception),
+                    (track, thresholdMs) -> handleTrackStuck(id, track, thresholdMs),
+                    () -> guild.getAudioManager().getConnectedChannel() != null
             );
             manager.getPlayer().setVolume(musicDataService.getVolume(id));
             applyPlaybackSpeedFilter(manager, musicDataService.getPlaybackSpeed(id));
@@ -528,6 +619,11 @@ public class MusicPlayerService {
     }
 
     public void leaveChannel(Guild guild) {
+        GuildMusicManager manager = musicManagers.get(guild.getIdLong());
+        trackRecoveryService.cancel(guild.getIdLong());
+        if (manager != null) {
+            manager.getScheduler().invalidatePlaybackGeneration();
+        }
         musicDataService.resetPlaybackSpeed(guild.getIdLong());
         guild.getAudioManager().closeAudioConnection();
         notifyStateChanged(guild.getIdLong());
@@ -546,7 +642,8 @@ public class MusicPlayerService {
         clearAutoplayNotice(guild.getIdLong());
         resumeIfPaused(guildMusicManager.getPlayer(), guild.getIdLong());
         String normalizedInput = normalizeRepeatedSpotifyUrl(input);
-        ResolvedInput resolvedInput = resolveInput(normalizedInput);
+        AudioInputClassifier.Classification classification = inputClassifier.classify(normalizedInput);
+        ResolvedInput resolvedInput = resolveInput(normalizedInput, classification);
         String identifier = resolvedInput.isUrl ? resolvedInput.identifier : YT_SEARCH_PREFIX + resolvedInput.identifier;
         load(guild.getIdLong(), guildMusicManager, messageSender, normalizedInput, identifier,
                 resolvedInput.sourceLabel, true, requesterId, requesterName, 0);
@@ -603,6 +700,10 @@ public class MusicPlayerService {
         load(guild.getIdLong(), guildMusicManager, messageSender, identifier, identifier, sourceLabel, false, requesterId, requesterName, 0);
     }
 
+    public boolean isUrlLikeInput(String input) {
+        return inputClassifier.classify(input).isUrlLike();
+    }
+
     private void load(long guildId,
                       GuildMusicManager guildMusicManager,
                       Consumer<String> messageSender,
@@ -613,6 +714,11 @@ public class MusicPlayerService {
                       Long requesterId,
                       String requesterName,
                       int spotifyRateLimitRetryAttempt) {
+        String inputError = validateInputForLoad(userInput);
+        if (inputError != null) {
+            messageSender.accept("LOAD_FAILED:" + inputError);
+            return;
+        }
         if (isSpotifyPlaylistUrl(userInput) && spotifyPlaylistLoadCooldownMs > 0L) {
             long now = System.currentTimeMillis();
             Long cooldownUntil = spotifyPlaylistCooldownByGuild.get(guildId);
@@ -640,7 +746,7 @@ public class MusicPlayerService {
             List<AudioTrack> cachedTracks = getCachedYoutubePlaylistTracks(userInput);
             if (!cachedTracks.isEmpty()) {
                 List<AudioTrack> limited = cachedTracks.stream().limit(playlistTrackLimit).toList();
-                enqueuePlaylistTracksBatched(guildMusicManager, limited, sourceLabel, requesterId, requesterName);
+                enqueuePlaylistTracksBatched(guildMusicManager, limited, sourceLabel, requesterId, requesterName, userInput, identifier);
                 messageSender.accept(limited.get(0).getInfo().title);
                 return;
             }
@@ -658,7 +764,7 @@ public class MusicPlayerService {
                     messageSender.accept("LOAD_FAILED:" + mapYouTubePrecheckFailure(precheck));
                     return;
                 }
-                applyTrackMetadata(track, sourceLabel, requesterId, requesterName);
+                applyTrackMetadata(track, sourceLabel, requesterId, requesterName, userInput, identifier);
                 guildMusicManager.getScheduler().queue(track);
                 messageSender.accept(track.getInfo().title);
             }
@@ -676,7 +782,7 @@ public class MusicPlayerService {
                     int limit = Math.min(spotifyPlaylistMaxTracks, playlist.getTracks().size());
                     for (int i = 0; i < limit; i++) {
                         AudioTrack track = playlist.getTracks().get(i);
-                        applyTrackMetadata(track, sourceLabel, requesterId, requesterName);
+                        applyTrackMetadata(track, sourceLabel, requesterId, requesterName, userInput, identifier);
                         guildMusicManager.getScheduler().queue(track);
                     }
                     messageSender.accept(playlist.getTracks().get(0).getInfo().title);
@@ -688,7 +794,7 @@ public class MusicPlayerService {
                             .map(AudioTrack::makeClone)
                             .toList();
                     cacheYoutubePlaylistTracks(userInput, tracksToQueue);
-                    enqueuePlaylistTracksBatched(guildMusicManager, tracksToQueue, sourceLabel, requesterId, requesterName);
+                    enqueuePlaylistTracksBatched(guildMusicManager, tracksToQueue, sourceLabel, requesterId, requesterName, userInput, identifier);
                     messageSender.accept(playlist.getTracks().get(0).getInfo().title);
                     return;
                 }
@@ -700,7 +806,7 @@ public class MusicPlayerService {
                     messageSender.accept("LOAD_FAILED:" + mapYouTubePrecheckFailure(precheck));
                     return;
                 }
-                applyTrackMetadata(firstTrack, sourceLabel, requesterId, requesterName);
+                applyTrackMetadata(firstTrack, sourceLabel, requesterId, requesterName, userInput, identifier);
                 guildMusicManager.getScheduler().queue(firstTrack);
                 messageSender.accept(firstTrack.getInfo().title);
             }
@@ -729,12 +835,12 @@ public class MusicPlayerService {
                         && isSpotifyTimeout(exception)
                         && spotifyRateLimitRetryAttempt < SPOTIFY_TIMEOUT_RETRY_MAX_ATTEMPTS) {
                     int nextAttempt = spotifyRateLimitRetryAttempt + 1;
-                    System.out.println("[NoRule] Spotify load timeout, retrying attempt "
-                            + nextAttempt
-                            + "/"
-                            + SPOTIFY_TIMEOUT_RETRY_MAX_ATTEMPTS
-                            + " for input="
-                            + userInput);
+                    LOGGER.warn(
+                            "[NoRule] Spotify load timeout, retrying attempt {}/{} for input={}",
+                            nextAttempt,
+                            SPOTIFY_TIMEOUT_RETRY_MAX_ATTEMPTS,
+                            sanitizeInputForLog(userInput)
+                    );
                     load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel, allowFallback, requesterId, requesterName, nextAttempt);
                     return;
                 }
@@ -756,7 +862,14 @@ public class MusicPlayerService {
                     load(guildId, guildMusicManager, messageSender, userInput, fallbackIdentifier, sourceLabel, false, requesterId, requesterName, 0);
                     return;
                 }
-                messageSender.accept("LOAD_FAILED:" + exception.getMessage());
+                AudioLoadFailureClassifier.Category category = failureClassifier.classify(exception);
+                if (category != AudioLoadFailureClassifier.Category.UNKNOWN
+                        && !looksLikeYouTubeUrl(userInput)
+                        && !looksLikeSpotifyUrl(userInput)) {
+                    messageSender.accept("LOAD_FAILED:" + failureClassifier.errorKey(category));
+                } else {
+                    messageSender.accept("LOAD_FAILED:" + exception.getMessage());
+                }
             }
         });
     }
@@ -790,26 +903,108 @@ public class MusicPlayerService {
         };
     }
 
+    private String validateInputForLoad(String input) {
+        AudioInputClassifier.Classification classification = inputClassifier.classify(input);
+        String errorKey = switch (classification.type()) {
+            case SPOTIFY_SHOW -> SPOTIFY_SHOW_UNSUPPORTED_ERROR_KEY;
+            case SPOTIFY_EPISODE -> SPOTIFY_EPISODE_UNSUPPORTED_ERROR_KEY;
+            case INVALID_URL -> failureClassifier.errorKey(AudioLoadFailureClassifier.Category.INVALID_INPUT);
+            case UNSUPPORTED_URL -> validateUnsupportedUrl(input, classification);
+            case DIRECT_HTTP_AUDIO -> validateDirectHttpInput(classification);
+            default -> null;
+        };
+        if (errorKey != null) {
+            LOGGER.warn(
+                    "[NoRule] Load rejected: context=queue/load input={} category={}",
+                    sanitizeInputForLog(input),
+                    errorKey
+            );
+        }
+        return errorKey;
+    }
+
+    private String validateUnsupportedUrl(String input, AudioInputClassifier.Classification classification) {
+        if (isSpotifyJamLink(input)) {
+            return SPOTIFY_JAM_UNSUPPORTED_ERROR_KEY;
+        }
+        AudioUrlSafetyValidator.Validation boundary = directHttpValidator.validateNetworkBoundary(classification.uri());
+        if (!boundary.allowed()) {
+            LOGGER.warn(
+                    "[NoRule] URL safety rejection: input={} safetyStatus={}",
+                    sanitizeInputForLog(input),
+                    boundary.status()
+            );
+        }
+        return failureClassifier.errorKey(AudioLoadFailureClassifier.Category.UNSUPPORTED_SOURCE);
+    }
+
+    private String validateDirectHttpInput(AudioInputClassifier.Classification classification) {
+        MusicConfig.Audio.DirectHttp directHttp = audioConfig.getDirectHttp();
+        if (!directHttp.isEnabled() || !directHttpSourceEnabled) {
+            return DIRECT_HTTP_DISABLED_ERROR_KEY;
+        }
+        AudioUrlSafetyValidator.Validation validation = directHttpValidator.validate(classification.uri());
+        if (validation.allowed()) {
+            return null;
+        }
+        LOGGER.warn(
+                "[NoRule] Direct HTTP safety rejection: input={} safetyStatus={}",
+                sanitizeInputForLog(classification.normalizedInput()),
+                validation.status()
+        );
+        if (validation.status() == AudioUrlSafetyValidator.Status.DNS_FAILURE) {
+            return failureClassifier.errorKey(AudioLoadFailureClassifier.Category.DNS_FAILURE);
+        }
+        if (validation.status() == AudioUrlSafetyValidator.Status.INVALID_URL
+                || validation.status() == AudioUrlSafetyValidator.Status.INVALID_HOST
+                || validation.status() == AudioUrlSafetyValidator.Status.UNSUPPORTED_SCHEME) {
+            return failureClassifier.errorKey(AudioLoadFailureClassifier.Category.INVALID_INPUT);
+        }
+        return failureClassifier.errorKey(AudioLoadFailureClassifier.Category.UNSUPPORTED_SOURCE);
+    }
+
+    private String sanitizeInputForLog(String input) {
+        if (input == null || input.isBlank()) {
+            return "-";
+        }
+        String sanitized = input.trim()
+                .replaceAll("(?i)(access_token|token|key|signature|sig|auth|authorization)=([^&\\s]*)", "$1=<redacted>")
+                .replaceAll("(?i)([?&])(si|utm_source)=([^&\\s]*)", "$1$2=<removed>");
+        return sanitized.length() <= 300 ? sanitized : sanitized.substring(0, 300);
+    }
+
     private void logLoadFailureDetails(String context, String userInput, String identifier, FriendlyException exception) {
         if (exception == null) {
-            System.out.println("[NoRule] Load failed: context=" + context + " input=" + userInput + " identifier=" + identifier + " (no exception)");
+            LOGGER.warn(
+                    "[NoRule] Load failed: context={} input={} identifier={} category=UNKNOWN message=-",
+                    context,
+                    sanitizeInputForLog(userInput),
+                    sanitizeInputForLog(identifier)
+            );
             return;
         }
-        String root = exception.getMessage();
+        String root = safeExceptionMessage(exception);
         Throwable cause = exception.getCause();
         while (cause != null) {
             if (cause.getMessage() != null && !cause.getMessage().isBlank()) {
-                root = cause.getClass().getSimpleName() + ": " + cause.getMessage();
+                root = cause.getClass().getSimpleName() + ": " + safeExceptionMessage(cause);
             } else {
                 root = cause.getClass().getSimpleName();
             }
             cause = cause.getCause();
         }
-        System.out.println("[NoRule] Load failed: context=" + context
-                + " input=" + userInput
-                + " identifier=" + identifier
-                + " message=" + exception.getMessage()
-                + " rootCause=" + root);
+        AudioLoadFailureClassifier.Category category = failureClassifier.classify(exception);
+        String summary = "[NoRule] Load failed: context=" + context
+                + " input=" + sanitizeInputForLog(userInput)
+                + " identifier=" + sanitizeInputForLog(identifier)
+                + " category=" + category
+                + " message=" + safeExceptionMessage(exception)
+                + " rootCause=" + root;
+        if (failureClassifier.isExpectedInputFailure(category)) {
+            LOGGER.warn(summary);
+        } else {
+            LOGGER.error(summary, exception);
+        }
     }
 
     private String rootCauseDetails(Throwable exception) {
@@ -827,7 +1022,7 @@ public class MusicPlayerService {
 
     private String safeExceptionMessage(Throwable exception) {
         String message = exception == null ? null : exception.getMessage();
-        return message == null || message.isBlank() ? "-" : message.trim();
+        return message == null || message.isBlank() ? "-" : sanitizeInputForLog(message);
     }
 
     private boolean isSpotifyRateLimited(FriendlyException exception) {
@@ -895,19 +1090,17 @@ public class MusicPlayerService {
     }
 
     private boolean isSpotifyPlaylistUrl(String text) {
-        if (text == null) {
-            return false;
-        }
-        String lower = text.toLowerCase();
-        return lower.contains("open.spotify.com/playlist/") || lower.startsWith("spotify:playlist:");
+        return inputClassifier.classify(text).type() == AudioInputClassifier.AudioInputType.SPOTIFY_PLAYLIST;
     }
 
     public void skip(Guild guild) {
+        trackRecoveryService.cancel(guild.getIdLong());
         getGuildMusicManager(guild).getScheduler().nextTrack();
     }
 
     public void stop(Guild guild) {
         GuildMusicManager manager = getGuildMusicManager(guild);
+        trackRecoveryService.cancel(guild.getIdLong());
         manager.getScheduler().clear();
         manager.getPlayer().stopTrack();
         clearAutoplayNotice(guild.getIdLong());
@@ -941,8 +1134,8 @@ public class MusicPlayerService {
         if (track == null) {
             return "-";
         }
-        TrackRequestContext context = readContext(track);
-        return context == null ? "youtube" : context.sourceLabel;
+        TrackLoadContext context = readContext(track);
+        return context == null ? "youtube" : context.sourceName();
     }
 
     public String getCurrentRequesterDisplay(Guild guild) {
@@ -950,14 +1143,14 @@ public class MusicPlayerService {
         if (track == null) {
             return "-";
         }
-        TrackRequestContext context = readContext(track);
+        TrackLoadContext context = readContext(track);
         if (context == null) {
             return "-";
         }
-        if (context.requesterId != null) {
-            return "<@" + context.requesterId + ">";
+        if (context.requesterId() != null) {
+            return "<@" + context.requesterId() + ">";
         }
-        return context.requesterName == null || context.requesterName.isBlank() ? "-" : context.requesterName;
+        return context.requesterName().isBlank() ? "-" : context.requesterName();
     }
 
     public long getCurrentPositionMillis(Guild guild) {
@@ -1134,12 +1327,17 @@ public class MusicPlayerService {
             ));
             return;
         }
-        ResolvedInput resolvedInput = resolveInput(trimmed);
+        String inputError = validateInputForLoad(trimmed);
+        if (inputError != null) {
+            onError.accept(inputError);
+            return;
+        }
+        ResolvedInput resolvedInput = resolveInput(trimmed, inputClassifier.classify(trimmed));
         String identifier = resolvedInput.isUrl ? resolvedInput.identifier : YT_SEARCH_PREFIX + resolvedInput.identifier;
         playerManager.loadItem(identifier, new AudioLoadResultHandler() {
             @Override
             public void trackLoaded(AudioTrack track) {
-                applyTrackMetadata(track, resolvedInput.sourceLabel, requesterId, requesterName);
+                applyTrackMetadata(track, resolvedInput.sourceLabel, requesterId, requesterName, trimmed, identifier);
                 onSuccess.accept(musicDataService.addPlaylistTrack(
                         guild.getIdLong(),
                         playlistName,
@@ -1164,7 +1362,7 @@ public class MusicPlayerService {
                     ));
                     return;
                 }
-                applyTrackMetadata(track, resolvedInput.sourceLabel, requesterId, requesterName);
+                applyTrackMetadata(track, resolvedInput.sourceLabel, requesterId, requesterName, trimmed, identifier);
                 onSuccess.accept(musicDataService.addPlaylistTrack(
                         guild.getIdLong(),
                         playlistName,
@@ -1187,7 +1385,14 @@ public class MusicPlayerService {
 
             @Override
             public void loadFailed(FriendlyException exception) {
-                onError.accept(exception == null || exception.getMessage() == null ? "-" : exception.getMessage().trim());
+                AudioLoadFailureClassifier.Category category = failureClassifier.classify(exception);
+                if (category != AudioLoadFailureClassifier.Category.UNKNOWN
+                        && !looksLikeYouTubeUrl(trimmed)
+                        && !looksLikeSpotifyUrl(trimmed)) {
+                    onError.accept(failureClassifier.errorKey(category));
+                } else {
+                    onError.accept(exception == null || exception.getMessage() == null ? "-" : exception.getMessage().trim());
+                }
             }
         });
     }
@@ -1252,6 +1457,10 @@ public class MusicPlayerService {
     }
 
     private void handleTrackStarted(long guildId, AudioTrack track) {
+        TrackLoadContext context = readContext(track);
+        if (context != null && context.recoveryAttempts() > 0) {
+            return;
+        }
         MusicDataService.PlaybackEntry entry = snapshotTrack(track);
         if (entry != null) {
             musicDataService.recordTrackStarted(guildId, entry);
@@ -1264,26 +1473,240 @@ public class MusicPlayerService {
         }
         long duration = Math.max(0L, track.getDuration());
         long position = Math.max(0L, track.getPosition());
-        long playedMillis = duration > 0L ? Math.min(duration, position) : position;
+        TrackLoadContext context = readContext(track);
+        long segmentStart = context == null ? 0L : Math.min(position, context.recoveryResumePosition());
+        long playedPosition = Math.max(0L, position - segmentStart);
+        long playableDuration = duration > 0L ? Math.max(0L, duration - segmentStart) : playedPosition;
+        long playedMillis = duration > 0L ? Math.min(playableDuration, playedPosition) : playedPosition;
         musicDataService.recordTrackFinished(guildId, playedMillis);
     }
 
     private void handleTrackException(long guildId, AudioTrack track, Throwable exception) {
-        String msg = exception == null || exception.getMessage() == null ? "-" : exception.getMessage().trim();
-        String trackIdentifier = track == null ? "-" : track.getIdentifier();
-        String trackTitle = track == null || track.getInfo() == null || track.getInfo().title == null
-                ? "-"
-                : track.getInfo().title;
-        System.out.println("[NoRule] Playback failed: guildId=" + guildId
-                + " identifier=" + trackIdentifier
-                + " title=" + trackTitle
-                + " message=" + msg
-                + " rootCause=" + rootCauseDetails(exception));
-        setAutoplayNotice(guildId, "LOAD_FAILED:" + msg);
+        AudioLoadFailureClassifier.Category category = failureClassifier.classify(exception);
+        logPlaybackFailure(guildId, track, category, exception);
+        if (failureClassifier.isRecoverable(category)) {
+            TrackRecoveryService.StartResult recovery = recoverTrack(guildId, track, category);
+            if (recovery == TrackRecoveryService.StartResult.STARTED
+                    || recovery == TrackRecoveryService.StartResult.ALREADY_IN_PROGRESS
+                    || recovery == TrackRecoveryService.StartResult.EXHAUSTED
+                    || recovery == TrackRecoveryService.StartResult.STALE) {
+                return;
+            }
+        }
+        notifyPlaybackFailure(guildId, trackTitle(track), failureClassifier.errorKey(category));
+        skipFailedTrack(guildId, track);
+    }
+
+    private void handleTrackStuck(long guildId, AudioTrack track, long thresholdMs) {
+        LOGGER.warn(
+                "[NoRule] Track stuck: guildId={} identifier={} thresholdMs={} positionMs={}",
+                guildId,
+                sanitizeInputForLog(track == null ? null : track.getIdentifier()),
+                thresholdMs,
+                track == null ? 0L : Math.max(0L, track.getPosition())
+        );
+        TrackRecoveryService.StartResult recovery = recoverTrack(
+                guildId,
+                track,
+                AudioLoadFailureClassifier.Category.TRACK_STUCK
+        );
+        if (recovery == TrackRecoveryService.StartResult.STARTED
+                || recovery == TrackRecoveryService.StartResult.ALREADY_IN_PROGRESS
+                || recovery == TrackRecoveryService.StartResult.EXHAUSTED
+                || recovery == TrackRecoveryService.StartResult.STALE) {
+            return;
+        }
+        notifyPlaybackFailure(guildId, trackTitle(track), failureClassifier.errorKey(AudioLoadFailureClassifier.Category.TRACK_STUCK));
+        skipFailedTrack(guildId, track);
+    }
+
+    private TrackRecoveryService.StartResult recoverTrack(long guildId,
+                                                          AudioTrack track,
+                                                          AudioLoadFailureClassifier.Category category) {
+        GuildMusicManager manager = musicManagers.get(guildId);
+        if (manager == null || track == null) {
+            return TrackRecoveryService.StartResult.STALE;
+        }
+        TrackLoadContext context = readContext(track);
+        if (context == null) {
+            String identifier = resolveRecoveryIdentifier(track, track.getIdentifier());
+            context = new TrackLoadContext(identifier, identifier, "youtube", null, "", 0);
+        }
+        String title = trackTitle(track);
+        return trackRecoveryService.recover(
+                guildId,
+                track,
+                context,
+                Math.max(0L, track.getPosition()),
+                track.isSeekable(),
+                recoveryGateway(manager),
+                new TrackRecoveryService.Listener() {
+                    @Override
+                    public void recovering(int attempt, int maxAttempts) {
+                        if (attempt == 1) {
+                            notifyPlaybackFailure(guildId, title, TRACK_RECOVERING_ERROR_KEY);
+                        }
+                        LOGGER.warn(
+                                "[NoRule] Track recovery started: guildId={} identifier={} category={} attempt={}/{}",
+                                guildId,
+                                sanitizeInputForLog(track.getIdentifier()),
+                                category,
+                                attempt,
+                                maxAttempts
+                        );
+                    }
+
+                    @Override
+                    public void recovered(int attempt) {
+                        clearAutoplayNotice(guildId);
+                        notifyStateChanged(guildId);
+                        LOGGER.info(
+                                "[NoRule] Track recovery completed: guildId={} identifier={} attempt={}",
+                                guildId,
+                                sanitizeInputForLog(track.getIdentifier()),
+                                attempt
+                        );
+                    }
+
+                    @Override
+                    public void recoveryFailed(Throwable failure) {
+                        logPlaybackFailure(guildId, track, failureClassifier.classify(failure), failure);
+                        notifyPlaybackFailure(guildId, title, TRACK_RECOVERY_FAILED_ERROR_KEY);
+                    }
+
+                    @Override
+                    public void exhausted(int maxAttempts) {
+                        LOGGER.warn(
+                                "[NoRule] Track recovery exhausted: guildId={} identifier={} maxAttempts={}",
+                                guildId,
+                                sanitizeInputForLog(track.getIdentifier()),
+                                maxAttempts
+                        );
+                        notifyPlaybackFailure(guildId, title, TRACK_RECOVERY_EXHAUSTED_ERROR_KEY);
+                    }
+                }
+        );
+    }
+
+    private TrackRecoveryService.RecoveryGateway recoveryGateway(GuildMusicManager manager) {
+        return new TrackRecoveryService.RecoveryGateway() {
+            @Override
+            public long playbackGeneration() {
+                return manager.getScheduler().getPlaybackGeneration();
+            }
+
+            @Override
+            public boolean isActive(Object track, long expectedGeneration) {
+                return manager.isConnected()
+                        && track instanceof AudioTrack audioTrack
+                        && manager.getScheduler().isActiveTrack(audioTrack, expectedGeneration);
+            }
+
+            @Override
+            public void pause(Object track, long expectedGeneration) {
+                if (track instanceof AudioTrack audioTrack) {
+                    manager.getScheduler().pauseIfCurrent(audioTrack, expectedGeneration);
+                }
+            }
+
+            @Override
+            public void reload(String identifier, TrackRecoveryService.RecoveryLoadHandler handler) {
+                String inputError = validateInputForLoad(identifier);
+                if (inputError != null) {
+                    handler.failed(new IllegalArgumentException(inputError));
+                    return;
+                }
+                playerManager.loadItemOrdered(manager, identifier, new AudioLoadResultHandler() {
+                    @Override
+                    public void trackLoaded(AudioTrack loadedTrack) {
+                        handler.loaded(loadedTrack, loadedTrack.isSeekable());
+                    }
+
+                    @Override
+                    public void playlistLoaded(AudioPlaylist playlist) {
+                        AudioTrack loadedTrack = playlist == null ? null
+                                : (playlist.getSelectedTrack() != null
+                                ? playlist.getSelectedTrack()
+                                : (playlist.getTracks().isEmpty() ? null : playlist.getTracks().get(0)));
+                        if (loadedTrack == null) {
+                            handler.noMatches();
+                        } else {
+                            handler.loaded(loadedTrack, loadedTrack.isSeekable());
+                        }
+                    }
+
+                    @Override
+                    public void noMatches() {
+                        handler.noMatches();
+                    }
+
+                    @Override
+                    public void loadFailed(FriendlyException exception) {
+                        handler.failed(exception);
+                    }
+                });
+            }
+
+            @Override
+            public boolean replace(Object expectedTrack,
+                                   Object replacement,
+                                   long expectedGeneration,
+                                   long resumePosition,
+                                   TrackLoadContext context) {
+                if (!(expectedTrack instanceof AudioTrack oldTrack) || !(replacement instanceof AudioTrack newTrack)) {
+                    return false;
+                }
+                newTrack.setUserData(context);
+                return manager.getScheduler().replaceIfCurrent(oldTrack, newTrack, expectedGeneration, resumePosition);
+            }
+
+            @Override
+            public void skip(Object expectedTrack, long expectedGeneration) {
+                if (expectedTrack instanceof AudioTrack audioTrack) {
+                    manager.getScheduler().skipIfCurrent(audioTrack, expectedGeneration);
+                }
+            }
+        };
+    }
+
+    private void skipFailedTrack(long guildId, AudioTrack track) {
+        GuildMusicManager manager = musicManagers.get(guildId);
+        if (manager == null || track == null) {
+            return;
+        }
+        long generation = manager.getScheduler().getPlaybackGeneration();
+        manager.getScheduler().skipIfCurrent(track, generation);
+    }
+
+    private void notifyPlaybackFailure(long guildId, String title, String rawError) {
+        setAutoplayNotice(guildId, "LOAD_FAILED:" + rawError);
         BiConsumer<Long, PlaybackFailure> listener = playbackFailureListener;
         if (listener != null) {
-            listener.accept(guildId, new PlaybackFailure(trackTitle, msg));
+            listener.accept(guildId, new PlaybackFailure(title, rawError));
         }
+    }
+
+    private void logPlaybackFailure(long guildId,
+                                    AudioTrack track,
+                                    AudioLoadFailureClassifier.Category category,
+                                    Throwable exception) {
+        String summary = "[NoRule] Playback failed: guildId=" + guildId
+                + " identifier=" + sanitizeInputForLog(track == null ? null : track.getIdentifier())
+                + " title=" + trackTitle(track)
+                + " category=" + category
+                + " message=" + safeExceptionMessage(exception)
+                + " rootCause=" + rootCauseDetails(exception);
+        if (category == AudioLoadFailureClassifier.Category.UNKNOWN) {
+            LOGGER.error(summary, exception);
+        } else {
+            LOGGER.warn(summary);
+        }
+    }
+
+    private String trackTitle(AudioTrack track) {
+        return track == null || track.getInfo() == null || track.getInfo().title == null
+                ? "-"
+                : track.getInfo().title;
     }
 
     public record PlaybackFailure(String title, String rawError) {
@@ -1540,25 +1963,49 @@ public class MusicPlayerService {
     }
 
     private void applyTrackMetadata(AudioTrack track, String sourceLabel, Long requesterId, String requesterName) {
+        String inferredInput = track == null || track.getInfo() == null ? "" : track.getInfo().uri;
+        applyTrackMetadata(track, sourceLabel, requesterId, requesterName, inferredInput, inferredInput);
+    }
+
+    private void applyTrackMetadata(AudioTrack track,
+                                    String sourceLabel,
+                                    Long requesterId,
+                                    String requesterName,
+                                    String originalInput,
+                                    String loadIdentifier) {
         if (track == null) {
             return;
         }
-        track.setUserData(new TrackRequestContext(
+        track.setUserData(new TrackLoadContext(
+                originalInput,
+                resolveRecoveryIdentifier(track, loadIdentifier),
                 normalizeSourceLabel(sourceLabel),
                 requesterId,
-                requesterName == null ? "" : requesterName.trim()
+                requesterName,
+                0
         ));
     }
 
-    private TrackRequestContext readContext(AudioTrack track) {
+    private TrackLoadContext readContext(AudioTrack track) {
         Object userData = track.getUserData();
-        if (userData instanceof TrackRequestContext) {
-            return (TrackRequestContext) userData;
+        if (userData instanceof TrackLoadContext context) {
+            return context;
         }
         if (userData instanceof String legacySource) {
-            return new TrackRequestContext(normalizeSourceLabel(legacySource), null, "");
+            String identifier = resolveRecoveryIdentifier(track, track.getIdentifier());
+            return new TrackLoadContext(identifier, identifier, normalizeSourceLabel(legacySource), null, "", 0);
         }
         return null;
+    }
+
+    private String resolveRecoveryIdentifier(AudioTrack track, String fallback) {
+        if (track != null && track.getIdentifier() != null && !track.getIdentifier().isBlank()) {
+            return track.getIdentifier();
+        }
+        if (track != null && track.getInfo() != null && track.getInfo().uri != null && !track.getInfo().uri.isBlank()) {
+            return track.getInfo().uri;
+        }
+        return fallback == null ? "" : fallback;
     }
 
     private String normalizeSourceLabel(String sourceLabel) {
@@ -1570,10 +2017,10 @@ public class MusicPlayerService {
             return null;
         }
         AudioTrackInfo info = track.getInfo();
-        TrackRequestContext context = readContext(track);
-        String source = context == null ? normalizeSourceLabel(null) : context.sourceLabel;
-        Long requesterId = context == null ? null : context.requesterId;
-        String requesterName = context == null ? "" : context.requesterName;
+        TrackLoadContext context = readContext(track);
+        String source = context == null ? normalizeSourceLabel(null) : context.sourceName();
+        Long requesterId = context == null ? null : context.requesterId();
+        String requesterName = context == null ? "" : context.requesterName();
         return new MusicDataService.PlaybackEntry(
                 Instant.now().toEpochMilli(),
                 info.title,
@@ -1676,19 +2123,19 @@ public class MusicPlayerService {
                 && firstResource.group(2).equals(secondResource.group(2));
     }
 
-    private ResolvedInput resolveInput(String input) {
+    private ResolvedInput resolveInput(String input, AudioInputClassifier.Classification classification) {
         String trimmed = input.trim();
         if (YouTubePlaybackPrecheckService.isValidVideoId(trimmed)) {
             return new ResolvedInput("https://www.youtube.com/watch?v=" + trimmed, true, "youtube");
         }
-        if (!looksLikeUrl(trimmed)) {
+        if (classification == null || classification.type() == AudioInputClassifier.AudioInputType.SEARCH_QUERY) {
             return new ResolvedInput(trimmed, false, "youtube");
         }
-        if (looksLikeSpotifyUrl(trimmed)) {
+        if (isSpotifyClassification(classification.type())) {
             if (spotifySourceEnabled) {
                 return new ResolvedInput(trimmed, true, "spotify");
             }
-            if (looksLikeSpotifyTrackUrl(trimmed)) {
+            if (classification.type() == AudioInputClassifier.AudioInputType.SPOTIFY_TRACK) {
                 String keyword = resolveSpotifyToSearch(trimmed);
                 if (!keyword.isBlank()) {
                     return new ResolvedInput(keyword, false, "spotify");
@@ -1697,10 +2144,7 @@ public class MusicPlayerService {
             // Avoid mismatched songs for playlists/albums/artists when Spotify source is unavailable.
             return new ResolvedInput(trimmed, true, "spotify");
         }
-        if (looksLikeSoundCloudUrl(trimmed)) {
-            return new ResolvedInput(trimmed, true, "soundcloud");
-        }
-        if (looksLikeYouTubeUrl(trimmed)) {
+        if (classification.type() == AudioInputClassifier.AudioInputType.YOUTUBE_URL) {
             String normalized = normalizeYouTubePlaybackUrl(trimmed);
             if (isYouTubePlaylistUrl(normalized)) {
                 return new ResolvedInput(normalized, true, "youtube");
@@ -1710,6 +2154,9 @@ public class MusicPlayerService {
                 return new ResolvedInput(strictPlaylistUrl, true, "youtube");
             }
             return new ResolvedInput(normalized, true, "youtube");
+        }
+        if (classification.type() == AudioInputClassifier.AudioInputType.KNOWN_AUDIO_SERVICE_URL) {
+            return new ResolvedInput(trimmed, true, detectKnownServiceSource(classification.uri()));
         }
         return new ResolvedInput(trimmed, true, "url");
     }
@@ -1766,13 +2213,8 @@ public class MusicPlayerService {
                 .trim();
     }
 
-    private boolean looksLikeUrl(String text) {
-        return text.startsWith("http://") || text.startsWith("https://");
-    }
-
     private boolean looksLikeYouTubeUrl(String text) {
-        String lower = text.toLowerCase();
-        return lower.contains("youtube.com") || lower.contains("youtu.be");
+        return inputClassifier.classify(text).type() == AudioInputClassifier.AudioInputType.YOUTUBE_URL;
     }
 
     private boolean isYouTubePlaylistUrl(String text) {
@@ -1817,7 +2259,9 @@ public class MusicPlayerService {
                                               List<AudioTrack> tracks,
                                               String sourceLabel,
                                               Long requesterId,
-                                              String requesterName) {
+                                              String requesterName,
+                                              String originalInput,
+                                              String loadIdentifier) {
         if (tracks == null || tracks.isEmpty()) {
             return;
         }
@@ -1828,7 +2272,7 @@ public class MusicPlayerService {
                 if (track == null) {
                     continue;
                 }
-                applyTrackMetadata(track, sourceLabel, requesterId, requesterName);
+                applyTrackMetadata(track, sourceLabel, requesterId, requesterName, originalInput, loadIdentifier);
                 guildMusicManager.getScheduler().queue(track);
             }
         }
@@ -1883,50 +2327,92 @@ public class MusicPlayerService {
     }
 
     private boolean looksLikeSpotifyUrl(String text) {
-        String lower = text.toLowerCase();
-        return lower.contains("open.spotify.com/") || lower.startsWith("spotify:");
+        return isSpotifyClassification(inputClassifier.classify(text).type());
     }
 
     private boolean looksLikeSpotifyOrShareUrl(String text) {
         if (text == null) {
             return false;
         }
-        String lower = text.toLowerCase();
-        return looksLikeSpotifyUrl(text)
-                || lower.contains("spotify.link/")
-                || lower.contains("spotify.app.link/");
+        return looksLikeSpotifyUrl(text) || hasExactHost(text, "spotify.link", "spotify.app.link");
     }
 
     private boolean isSpotifyJamLink(String text) {
         if (text == null) {
             return false;
         }
-        String lower = text.toLowerCase();
-        return lower.contains("open.spotify.com/socialsession/")
-                || lower.contains("spotify.link/")
-                || lower.contains("spotify.app.link/");
+        if (hasExactHost(text, "spotify.link", "spotify.app.link")) {
+            return true;
+        }
+        URI uri = parseHttpUri(text);
+        return uri != null
+                && hasExactHost(uri, "open.spotify.com", "www.open.spotify.com")
+                && uri.getPath() != null
+                && uri.getPath().toLowerCase().contains("/socialsession/");
     }
 
     private boolean isSpotifyProfileLink(String text) {
         if (text == null) {
             return false;
         }
-        String lower = text.toLowerCase();
-        return lower.contains("open.spotify.com/account/profile")
-                || lower.contains("open.spotify.com/user/")
-                || lower.contains("open.spotify.com/intl-") && lower.contains("/account/profile");
+        URI uri = parseHttpUri(text);
+        if (uri == null || !hasExactHost(uri, "open.spotify.com", "www.open.spotify.com")) {
+            return false;
+        }
+        String path = uri.getPath() == null ? "" : uri.getPath().toLowerCase();
+        return path.contains("/account/profile") || path.contains("/user/");
     }
 
-    private boolean looksLikeSpotifyTrackUrl(String text) {
-        String lower = text.toLowerCase();
-        return lower.contains("open.spotify.com/track/")
-                || lower.contains("open.spotify.com/intl-") && lower.contains("/track/")
-                || lower.startsWith("spotify:track:");
+    private boolean isSpotifyClassification(AudioInputClassifier.AudioInputType type) {
+        return type == AudioInputClassifier.AudioInputType.SPOTIFY_TRACK
+                || type == AudioInputClassifier.AudioInputType.SPOTIFY_ALBUM
+                || type == AudioInputClassifier.AudioInputType.SPOTIFY_PLAYLIST
+                || type == AudioInputClassifier.AudioInputType.SPOTIFY_ARTIST
+                || type == AudioInputClassifier.AudioInputType.SPOTIFY_EPISODE
+                || type == AudioInputClassifier.AudioInputType.SPOTIFY_SHOW;
     }
 
-    private boolean looksLikeSoundCloudUrl(String text) {
-        String lower = text.toLowerCase();
-        return lower.contains("soundcloud.com/");
+    private String detectKnownServiceSource(URI uri) {
+        if (uri == null || uri.getHost() == null) {
+            return "url";
+        }
+        String host = uri.getHost().toLowerCase();
+        if (host.equals("soundcloud.com") || host.endsWith(".soundcloud.com")) {
+            return "soundcloud";
+        }
+        if (host.equals("bandcamp.com") || host.endsWith(".bandcamp.com")) {
+            return "bandcamp";
+        }
+        return host;
+    }
+
+    private boolean hasExactHost(String text, String... hosts) {
+        URI uri = parseHttpUri(text);
+        return uri != null && hasExactHost(uri, hosts);
+    }
+
+    private boolean hasExactHost(URI uri, String... hosts) {
+        if (uri == null || uri.getHost() == null) {
+            return false;
+        }
+        String actual = uri.getHost().toLowerCase();
+        return Arrays.stream(hosts).anyMatch(host -> actual.equals(host));
+    }
+
+    private URI parseHttpUri(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            URI uri = URI.create(text.trim());
+            String scheme = uri.getScheme();
+            return scheme != null
+                    && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))
+                    ? uri
+                    : null;
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     private static class ResolvedInput {
@@ -1941,17 +2427,6 @@ public class MusicPlayerService {
         }
     }
 
-    private static class TrackRequestContext {
-        private final String sourceLabel;
-        private final Long requesterId;
-        private final String requesterName;
-
-        private TrackRequestContext(String sourceLabel, Long requesterId, String requesterName) {
-            this.sourceLabel = sourceLabel;
-            this.requesterId = requesterId;
-            this.requesterName = requesterName;
-        }
-    }
 }
 
 

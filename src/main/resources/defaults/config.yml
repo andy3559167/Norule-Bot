@@ -1,0 +1,149 @@
+# Discord Bot Token (or set DISCORD_TOKEN env var)
+token: ""
+
+# Command prefix
+prefix: "!"
+
+# Enable debug logging
+debug: false
+
+# Restrict slash command registration to a guild ID (empty = global)
+commandGuildId: ""
+
+# Data and resource paths
+data:
+  guildSettingsDir: "guild/configs"
+  languageDir: "lang"
+  cacheDir: "cache"
+  musicDir: "guild/music"
+  moderationDir: "guild/moderation"
+  ticketDir: "guild/tickets"
+  ticketTranscriptDir: "ticket-transcripts"
+  honeypotDir: "guild/honeypot"
+  logDir: "logs"
+
+# Default language
+defaultLanguage: "zh-TW"
+
+# Command cooldown in seconds
+commandCooldownSeconds: 3
+
+# Number-chain reaction delay in milliseconds
+numberChainReactionDelayMillis: 500
+
+# Bot profile / presence
+bot:
+  description: 'NoRule Music Bot | /help'
+  presenceStatus: "ONLINE"
+  activityType: "LISTENING"
+  rotationSeconds: 20
+  activities:
+    - "LISTENING|NoRule Music Bot"
+  activityText: "NoRule Music Bot"
+
+# Developer whitelist IDs
+developers:
+  ids: []
+  # Destination channel for /report (bug reports & feedback). 0 or unset disables the command.
+  developerChannelId: 0
+
+# Global music integrations
+music:
+  youtube:
+    oauthEnabled: false
+    oauthRefreshToken: ""
+    cipherEnabled: false
+    cipherServer: "http://localhost:8001"
+    cipherPassword: "test"
+    cipherUserAgent: "norule-music-bot"
+    # Optional strict queue precheck using youtube-source plugin GET /youtube/stream/{videoId}.
+    # Enable only when lavalinkBaseUrl/lavalinkPassword point to a Lavalink node with youtube-plugin installed.
+    strictPrecheck:
+      enabled: false
+      cacheTtlHours: 24
+      timeoutMillis: 5000
+      lavalinkBaseUrl: ""
+      lavalinkPassword: ""
+  spotify:
+    enabled: false
+    clientId: ""
+    clientSecret: ""
+    spDc: ""
+    countryCode: "TW"
+    preferAnonymousToken: true
+    customTokenEndpoint: ""
+  audio:
+    direct-http:
+      enabled: false
+      connect-timeout-ms: 5000
+      read-timeout-ms: 10000
+      max-redirects: 3
+      # Direct HTTP stays unavailable until at least one trusted host is listed.
+      allowed-hosts: []
+    recovery:
+      enabled: true
+      max-stuck-retries: 2
+      resume-rewind-ms: 2000
+      stuck-threshold-ms: 20000
+
+# Web control panel
+web:
+  enabled: false
+  bind:
+    host: "0.0.0.0"
+    port: 60000
+  public:
+    baseUrl: "https://dash.example.com"
+  sessionExpireMinutes: 720
+  discordClientId: ""
+  discordClientSecret: ""
+  discordRedirectUri: "https://dash.example.com/auth/callback"
+  ssl:
+    enabled: false
+    certDir: "certs"
+    privateKeyFile: "privkey.pem"
+    fullChainFile: "fullchain.pem"
+    keyStoreFile: "web-keystore.p12"
+    keyStoreType: "PKCS12"
+    keyStorePassword: ""
+    keyPassword: ""
+
+# Shared database settings
+database:
+  storage: "sqlite"
+  mysql:
+    jdbcUrl: "jdbc:mysql://localhost:3306/data?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC"
+    username: "root"
+    password: ""
+    poolSize: 8
+  sqlite:
+    path: "data/norule.db"
+
+# Stats advanced settings (reserved)
+stats: {}
+
+# Short URL service
+shortUrl:
+  enabled: false
+  bindHost: "0.0.0.0"
+  bindPort: 60001
+  publicBaseUrl: "https://s.norule.me"
+  codeLength: 7
+  allowPrivateTargets: false
+  dedupe: true
+  ttlDays: 7
+  cleanupIntervalMinutes: 10
+  image:
+    enabled: true
+    defaultRetentionHours: 1
+    maxRetentionDays: 365
+    maxFileSizeMb: 20
+    maxVideoFileSizeMb: 100
+    maxVideoDurationSeconds: 300
+    storagePath: "data/short-url-images"
+
+# Minecraft status query settings
+minecraftStatus:
+  userAgent: "NoRuleBot/1.0 contact: admin@norule.me"
+  requestTimeoutMillis: 15000
+  internalCacheSeconds: 60

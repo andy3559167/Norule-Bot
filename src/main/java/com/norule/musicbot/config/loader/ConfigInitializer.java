@@ -141,12 +141,16 @@ public final class ConfigInitializer {
         if (!music.isEmpty()) {
             Map<String, Object> youtube = asMap(music.get("youtube"));
             Map<String, Object> spotify = asMap(music.get("spotify"));
+            Map<String, Object> audio = asMap(music.get("audio"));
             Map<String, Object> globalMusic = new LinkedHashMap<>();
             if (!youtube.isEmpty()) {
                 globalMusic.put("youtube", youtube);
             }
             if (!spotify.isEmpty()) {
                 globalMusic.put("spotify", spotify);
+            }
+            if (!audio.isEmpty()) {
+                globalMusic.put("audio", audio);
             }
             config.put("music", globalMusic);
         }
@@ -303,6 +307,8 @@ public final class ConfigInitializer {
                 out.add("    # Optional Lavalink youtube-source stream precheck before queueing a YouTube video");
             } else if ("spotify:".equals(trimmed) && line.startsWith("  ")) {
                 out.add("  # Spotify source options");
+            } else if ("audio:".equals(trimmed) && line.startsWith("  ")) {
+                out.add("  # Direct HTTP safety and playback recovery options");
             } else if ("web:".equals(trimmed)) {
                 out.add("");
                 out.add("# Web control panel");

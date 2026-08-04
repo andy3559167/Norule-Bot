@@ -1107,6 +1107,7 @@ public String getToken() {
         private final int playlistTrackLimit;
         private final Youtube youtube;
         private final Spotify spotify;
+        private final Audio audio;
 
         private Music(boolean autoLeaveEnabled,
                       int autoLeaveMinutes,
@@ -1117,7 +1118,8 @@ public String getToken() {
                       int statsRetentionDays,
                       int playlistTrackLimit,
                       Youtube youtube,
-                      Spotify spotify) {
+                      Spotify spotify,
+                      Audio audio) {
             this.autoLeaveEnabled = autoLeaveEnabled;
             this.autoLeaveMinutes = autoLeaveMinutes;
             this.autoplayEnabled = autoplayEnabled;
@@ -1128,6 +1130,7 @@ public String getToken() {
             this.playlistTrackLimit = Math.max(1, playlistTrackLimit);
             this.youtube = youtube == null ? Youtube.defaultValues() : youtube;
             this.spotify = spotify == null ? Spotify.defaultValues() : spotify;
+            this.audio = audio == null ? Audio.defaultValues() : audio;
         }
 
         public static Music fromMap(Map<String, Object> map, Music fallback) {
@@ -1142,44 +1145,46 @@ public String getToken() {
                     getInt(map, "statsRetentionDays", defaults.getStatsRetentionDays()),
                     getInt(map, "playlistTrackLimit", defaults.getPlaylistTrackLimit()),
                     Youtube.fromMap(asMap(map.get("youtube")), defaults.getYoutube()),
-                    Spotify.fromMap(asMap(map.get("spotify")), defaults.getSpotify())
+                    Spotify.fromMap(asMap(map.get("spotify")), defaults.getSpotify()),
+                    Audio.fromMap(asMap(map.get("audio")), defaults.getAudio())
             );
         }
 
         public static Music defaultValues() {
-            return new Music(true, 5, true, RepeatMode.OFF, null, 50, 0, 100, Youtube.defaultValues(), Spotify.defaultValues());
+            return new Music(true, 5, true, RepeatMode.OFF, null, 50, 0, 100,
+                    Youtube.defaultValues(), Spotify.defaultValues(), Audio.defaultValues());
         }
 
         public Music withAutoLeaveEnabled(boolean enabled) {
-            return new Music(enabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify);
+            return new Music(enabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify, audio);
         }
 
         public Music withAutoLeaveMinutes(int minutes) {
-            return new Music(autoLeaveEnabled, Math.max(1, minutes), autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify);
+            return new Music(autoLeaveEnabled, Math.max(1, minutes), autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify, audio);
         }
 
         public Music withAutoplayEnabled(boolean enabled) {
-            return new Music(autoLeaveEnabled, autoLeaveMinutes, enabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify);
+            return new Music(autoLeaveEnabled, autoLeaveMinutes, enabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify, audio);
         }
 
         public Music withDefaultRepeatMode(RepeatMode mode) {
-            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, mode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify);
+            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, mode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify, audio);
         }
 
         public Music withCommandChannelId(Long commandChannelId) {
-            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify);
+            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify, audio);
         }
 
         public Music withHistoryLimit(int historyLimit) {
-            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify);
+            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify, audio);
         }
 
         public Music withStatsRetentionDays(int statsRetentionDays) {
-            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify);
+            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify, audio);
         }
 
         public Music withPlaylistTrackLimit(int playlistTrackLimit) {
-            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify);
+            return new Music(autoLeaveEnabled, autoLeaveMinutes, autoplayEnabled, defaultRepeatMode, commandChannelId, historyLimit, statsRetentionDays, playlistTrackLimit, youtube, spotify, audio);
         }
 
         public boolean isAutoLeaveEnabled() {
@@ -1222,11 +1227,133 @@ public String getToken() {
             return spotify;
         }
 
+        public Audio getAudio() {
+            return audio;
+        }
+
         private static RepeatMode parseRepeatMode(String value) {
             try {
                 return RepeatMode.valueOf(value.trim().toUpperCase());
             } catch (Exception ignored) {
                 return RepeatMode.OFF;
+            }
+        }
+
+        public static class Audio {
+            private final DirectHttp directHttp;
+            private final Recovery recovery;
+
+            private Audio(DirectHttp directHttp, Recovery recovery) {
+                this.directHttp = directHttp == null ? DirectHttp.defaultValues() : directHttp;
+                this.recovery = recovery == null ? Recovery.defaultValues() : recovery;
+            }
+
+            public static Audio fromMap(Map<String, Object> map, Audio fallback) {
+                Audio defaults = fallback == null ? defaultValues() : fallback;
+                Map<String, Object> directHttp = asMap(map.get("directHttp"));
+                if (directHttp.isEmpty()) {
+                    directHttp = asMap(map.get("direct-http"));
+                }
+                return new Audio(
+                        DirectHttp.fromMap(directHttp, defaults.getDirectHttp()),
+                        Recovery.fromMap(asMap(map.get("recovery")), defaults.getRecovery())
+                );
+            }
+
+            public static Audio defaultValues() {
+                return new Audio(DirectHttp.defaultValues(), Recovery.defaultValues());
+            }
+
+            public DirectHttp getDirectHttp() {
+                return directHttp;
+            }
+
+            public Recovery getRecovery() {
+                return recovery;
+            }
+
+            public static class DirectHttp {
+                private final boolean enabled;
+                private final int connectTimeoutMillis;
+                private final int readTimeoutMillis;
+                private final int maxRedirects;
+                private final List<String> allowedHosts;
+
+                private DirectHttp(boolean enabled,
+                                   int connectTimeoutMillis,
+                                   int readTimeoutMillis,
+                                   int maxRedirects,
+                                   List<String> allowedHosts) {
+                    this.enabled = enabled;
+                    this.connectTimeoutMillis = Math.max(1, connectTimeoutMillis);
+                    this.readTimeoutMillis = Math.max(1, readTimeoutMillis);
+                    this.maxRedirects = Math.max(0, maxRedirects);
+                    this.allowedHosts = allowedHosts == null ? List.of() : List.copyOf(allowedHosts);
+                }
+
+                public static DirectHttp fromMap(Map<String, Object> map, DirectHttp fallback) {
+                    DirectHttp defaults = fallback == null ? defaultValues() : fallback;
+                    return new DirectHttp(
+                            getBoolean(map, "enabled", defaults.isEnabled()),
+                            getInt(map, "connectTimeoutMillis",
+                                    getInt(map, "connect-timeout-ms", defaults.getConnectTimeoutMillis())),
+                            getInt(map, "readTimeoutMillis",
+                                    getInt(map, "read-timeout-ms", defaults.getReadTimeoutMillis())),
+                            getInt(map, "maxRedirects",
+                                    getInt(map, "max-redirects", defaults.getMaxRedirects())),
+                            getStringList(map, "allowedHosts",
+                                    getStringList(map, "allowed-hosts", defaults.getAllowedHosts()))
+                    );
+                }
+
+                public static DirectHttp defaultValues() {
+                    return new DirectHttp(false, 5000, 10000, 3, List.of());
+                }
+
+                public boolean isEnabled() { return enabled; }
+                public int getConnectTimeoutMillis() { return connectTimeoutMillis; }
+                public int getReadTimeoutMillis() { return readTimeoutMillis; }
+                public int getMaxRedirects() { return maxRedirects; }
+                public List<String> getAllowedHosts() { return allowedHosts; }
+            }
+
+            public static class Recovery {
+                private final boolean enabled;
+                private final int maxStuckRetries;
+                private final int resumeRewindMillis;
+                private final int stuckThresholdMillis;
+
+                private Recovery(boolean enabled,
+                                 int maxStuckRetries,
+                                 int resumeRewindMillis,
+                                 int stuckThresholdMillis) {
+                    this.enabled = enabled;
+                    this.maxStuckRetries = Math.max(0, maxStuckRetries);
+                    this.resumeRewindMillis = Math.max(0, resumeRewindMillis);
+                    this.stuckThresholdMillis = Math.max(1, stuckThresholdMillis);
+                }
+
+                public static Recovery fromMap(Map<String, Object> map, Recovery fallback) {
+                    Recovery defaults = fallback == null ? defaultValues() : fallback;
+                    return new Recovery(
+                            getBoolean(map, "enabled", defaults.isEnabled()),
+                            getInt(map, "maxStuckRetries",
+                                    getInt(map, "max-stuck-retries", defaults.getMaxStuckRetries())),
+                            getInt(map, "resumeRewindMillis",
+                                    getInt(map, "resume-rewind-ms", defaults.getResumeRewindMillis())),
+                            getInt(map, "stuckThresholdMillis",
+                                    getInt(map, "stuck-threshold-ms", defaults.getStuckThresholdMillis()))
+                    );
+                }
+
+                public static Recovery defaultValues() {
+                    return new Recovery(true, 2, 2000, 20000);
+                }
+
+                public boolean isEnabled() { return enabled; }
+                public int getMaxStuckRetries() { return maxStuckRetries; }
+                public int getResumeRewindMillis() { return resumeRewindMillis; }
+                public int getStuckThresholdMillis() { return stuckThresholdMillis; }
             }
         }
 

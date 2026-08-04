@@ -3,6 +3,100 @@ package com.norule.musicbot.config.domain;
 import com.norule.musicbot.config.BotConfig;
 
 public final class MusicConfig {
+    public static final class Audio {
+        public static final class DirectHttp {
+            private final boolean enabled;
+            private final int connectTimeoutMillis;
+            private final int readTimeoutMillis;
+            private final int maxRedirects;
+            private final java.util.List<String> allowedHosts;
+
+            public DirectHttp(boolean enabled,
+                              int connectTimeoutMillis,
+                              int readTimeoutMillis,
+                              int maxRedirects,
+                              java.util.List<String> allowedHosts) {
+                this.enabled = enabled;
+                this.connectTimeoutMillis = Math.max(1, connectTimeoutMillis);
+                this.readTimeoutMillis = Math.max(1, readTimeoutMillis);
+                this.maxRedirects = Math.max(0, maxRedirects);
+                this.allowedHosts = allowedHosts == null ? java.util.List.of() : java.util.List.copyOf(allowedHosts);
+            }
+
+            static DirectHttp fromLegacy(BotConfig.Music.Audio.DirectHttp legacy) {
+                BotConfig.Music.Audio.DirectHttp value = legacy == null
+                        ? BotConfig.Music.Audio.DirectHttp.defaultValues()
+                        : legacy;
+                return new DirectHttp(
+                        value.isEnabled(),
+                        value.getConnectTimeoutMillis(),
+                        value.getReadTimeoutMillis(),
+                        value.getMaxRedirects(),
+                        value.getAllowedHosts()
+                );
+            }
+
+            public boolean isEnabled() { return enabled; }
+            public int getConnectTimeoutMillis() { return connectTimeoutMillis; }
+            public int getReadTimeoutMillis() { return readTimeoutMillis; }
+            public int getMaxRedirects() { return maxRedirects; }
+            public java.util.List<String> getAllowedHosts() { return allowedHosts; }
+        }
+
+        public static final class Recovery {
+            private final boolean enabled;
+            private final int maxStuckRetries;
+            private final int resumeRewindMillis;
+            private final int stuckThresholdMillis;
+
+            public Recovery(boolean enabled,
+                            int maxStuckRetries,
+                            int resumeRewindMillis,
+                            int stuckThresholdMillis) {
+                this.enabled = enabled;
+                this.maxStuckRetries = Math.max(0, maxStuckRetries);
+                this.resumeRewindMillis = Math.max(0, resumeRewindMillis);
+                this.stuckThresholdMillis = Math.max(1, stuckThresholdMillis);
+            }
+
+            static Recovery fromLegacy(BotConfig.Music.Audio.Recovery legacy) {
+                BotConfig.Music.Audio.Recovery value = legacy == null
+                        ? BotConfig.Music.Audio.Recovery.defaultValues()
+                        : legacy;
+                return new Recovery(
+                        value.isEnabled(),
+                        value.getMaxStuckRetries(),
+                        value.getResumeRewindMillis(),
+                        value.getStuckThresholdMillis()
+                );
+            }
+
+            public boolean isEnabled() { return enabled; }
+            public int getMaxStuckRetries() { return maxStuckRetries; }
+            public int getResumeRewindMillis() { return resumeRewindMillis; }
+            public int getStuckThresholdMillis() { return stuckThresholdMillis; }
+        }
+
+        private final DirectHttp directHttp;
+        private final Recovery recovery;
+
+        public Audio(DirectHttp directHttp, Recovery recovery) {
+            this.directHttp = directHttp == null ? DirectHttp.fromLegacy(null) : directHttp;
+            this.recovery = recovery == null ? Recovery.fromLegacy(null) : recovery;
+        }
+
+        static Audio fromLegacy(BotConfig.Music.Audio legacy) {
+            BotConfig.Music.Audio value = legacy == null ? BotConfig.Music.Audio.defaultValues() : legacy;
+            return new Audio(
+                    DirectHttp.fromLegacy(value.getDirectHttp()),
+                    Recovery.fromLegacy(value.getRecovery())
+            );
+        }
+
+        public DirectHttp getDirectHttp() { return directHttp; }
+        public Recovery getRecovery() { return recovery; }
+    }
+
     public static final class Youtube {
         private final boolean oauthEnabled;
         private final boolean cipherEnabled;
@@ -155,6 +249,7 @@ public final class MusicConfig {
     private final int playlistTrackLimit;
     private final Youtube youtube;
     private final Spotify spotify;
+    private final Audio audio;
 
     public MusicConfig(boolean autoLeaveEnabled,
                        int autoLeaveMinutes,
@@ -165,7 +260,8 @@ public final class MusicConfig {
                        int statsRetentionDays,
                        int playlistTrackLimit,
                        Youtube youtube,
-                       Spotify spotify) {
+                       Spotify spotify,
+                       Audio audio) {
         this.autoLeaveEnabled = autoLeaveEnabled;
         this.autoLeaveMinutes = Math.max(0, autoLeaveMinutes);
         this.autoplayEnabled = autoplayEnabled;
@@ -176,6 +272,7 @@ public final class MusicConfig {
         this.playlistTrackLimit = Math.max(1, playlistTrackLimit);
         this.youtube = youtube == null ? Youtube.fromLegacy(null) : youtube;
         this.spotify = spotify == null ? Spotify.fromLegacy(null) : spotify;
+        this.audio = audio == null ? Audio.fromLegacy(null) : audio;
     }
 
     public static MusicConfig defaultValues() {
@@ -197,7 +294,8 @@ public final class MusicConfig {
                 value.statsRetentionDays,
                 value.playlistTrackLimit,
                 value.youtube,
-                value.spotify
+                value.spotify,
+                value.audio
         );
     }
 
@@ -214,7 +312,8 @@ public final class MusicConfig {
                 scopedValue.getStatsRetentionDays(),
                 scopedValue.getPlaylistTrackLimit(),
                 Youtube.fromLegacy(globalValue.getYoutube()),
-                Spotify.fromLegacy(globalValue.getSpotify())
+                Spotify.fromLegacy(globalValue.getSpotify()),
+                Audio.fromLegacy(globalValue.getAudio())
         );
     }
 
@@ -228,4 +327,5 @@ public final class MusicConfig {
     public int getPlaylistTrackLimit() { return playlistTrackLimit; }
     public Youtube getYoutube() { return youtube; }
     public Spotify getSpotify() { return spotify; }
+    public Audio getAudio() { return audio; }
 }

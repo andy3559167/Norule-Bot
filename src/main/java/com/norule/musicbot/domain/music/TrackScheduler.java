@@ -27,29 +27,38 @@ public class TrackScheduler extends AudioEventAdapter {
     private volatile Consumer<AudioTrack> trackStartListener;
     private volatile Consumer<AudioTrack> trackEndListener;
     private volatile BiConsumer<AudioTrack, FriendlyException> trackExceptionListener;
+    private volatile BiConsumer<AudioTrack, Long> trackStuckListener;
+    private long playbackGeneration;
+    private AudioTrack recoveringTrack;
+    private long recoveringGeneration = -1L;
 
     public TrackScheduler(AudioPlayer player) {
         this.player = player;
     }
 
-    public void queue(AudioTrack track) {
+    public synchronized void queue(AudioTrack track) {
         if (!player.startTrack(track, true)) {
             queue.offer(track);
+        } else {
+            playbackGeneration++;
+            clearRecoveryMarker();
         }
         notifyStateChanged();
     }
 
-    public void nextTrack() {
-        player.startTrack(queue.poll(), false);
+    public synchronized void nextTrack() {
+        startReplacement(queue.poll());
         notifyStateChanged();
     }
 
-    public void clear() {
+    public synchronized void clear() {
         queue.clear();
+        playbackGeneration++;
+        clearRecoveryMarker();
         notifyStateChanged();
     }
 
-    public int shuffleQueue() {
+    public synchronized int shuffleQueue() {
         List<AudioTrack> tracks = new ArrayList<>(queue);
         if (tracks.size() <= 1) {
             return tracks.size();
@@ -100,6 +109,54 @@ public class TrackScheduler extends AudioEventAdapter {
         this.trackExceptionListener = trackExceptionListener;
     }
 
+    public void setTrackStuckListener(BiConsumer<AudioTrack, Long> trackStuckListener) {
+        this.trackStuckListener = trackStuckListener;
+    }
+
+    public synchronized long getPlaybackGeneration() {
+        return playbackGeneration;
+    }
+
+    public synchronized boolean isActiveTrack(AudioTrack track, long expectedGeneration) {
+        return track != null
+                && (player.getPlayingTrack() == track || recoveringTrack == track)
+                && playbackGeneration == expectedGeneration;
+    }
+
+    public synchronized void pauseIfCurrent(AudioTrack track, long expectedGeneration) {
+        if (isActiveTrack(track, expectedGeneration)) {
+            recoveringTrack = track;
+            recoveringGeneration = expectedGeneration;
+            player.setPaused(true);
+        }
+    }
+
+    public synchronized boolean replaceIfCurrent(AudioTrack expectedTrack,
+                                                 AudioTrack replacement,
+                                                 long expectedGeneration,
+                                                 long resumePosition) {
+        if (replacement == null || !isActiveTrack(expectedTrack, expectedGeneration)) {
+            return false;
+        }
+        if (replacement.isSeekable() && resumePosition > 0L) {
+            replacement.setPosition(resumePosition);
+        }
+        startReplacement(replacement);
+        notifyStateChanged();
+        return true;
+    }
+
+    public synchronized void skipIfCurrent(AudioTrack expectedTrack, long expectedGeneration) {
+        if (isActiveTrack(expectedTrack, expectedGeneration)) {
+            nextTrack();
+        }
+    }
+
+    public synchronized void invalidatePlaybackGeneration() {
+        playbackGeneration++;
+        clearRecoveryMarker();
+    }
+
     @Override
     public void onTrackStart(AudioPlayer player, AudioTrack track) {
         Consumer<AudioTrack> startListener = trackStartListener;
@@ -110,7 +167,7 @@ public class TrackScheduler extends AudioEventAdapter {
     }
 
     @Override
-    public void onTrackEnd(AudioPlayer player, AudioTrack track, AudioTrackEndReason endReason) {
+    public synchronized void onTrackEnd(AudioPlayer player, AudioTrack track, AudioTrackEndReason endReason) {
         Consumer<AudioTrack> endListener = trackEndListener;
         if (endListener != null && track != null) {
             endListener.accept(track);
@@ -120,24 +177,31 @@ public class TrackScheduler extends AudioEventAdapter {
             return;
         }
 
+        if (endReason == AudioTrackEndReason.LOAD_FAILED
+                && recoveringTrack == track
+                && recoveringGeneration == playbackGeneration) {
+            notifyStateChanged();
+            return;
+        }
+
         if (repeatMode == RepeatMode.SINGLE && track != null) {
-            player.startTrack(track.makeClone(), false);
+            startReplacement(cloneWithUserData(track));
             notifyStateChanged();
             return;
         }
 
         if (repeatMode == RepeatMode.ALL && track != null) {
-            queue.offer(track.makeClone());
+            queue.offer(cloneWithUserData(track));
         }
 
         AudioTrack next = queue.poll();
         if (next != null) {
-            player.startTrack(next, false);
+            startReplacement(next);
             notifyStateChanged();
             return;
         }
 
-        player.startTrack(null, false);
+        startReplacement(null);
         if (repeatMode == RepeatMode.OFF && track != null) {
             Consumer<AudioTrack> listener = queueExhaustedListener;
             if (listener != null) {
@@ -152,19 +216,40 @@ public class TrackScheduler extends AudioEventAdapter {
         BiConsumer<AudioTrack, FriendlyException> listener = trackExceptionListener;
         if (listener != null) {
             listener.accept(track, exception);
+        } else {
+            nextTrack();
         }
-        nextTrack();
         notifyStateChanged();
     }
 
     @Override
     public void onTrackStuck(AudioPlayer player, AudioTrack track, long thresholdMs) {
-        BiConsumer<AudioTrack, FriendlyException> listener = trackExceptionListener;
+        BiConsumer<AudioTrack, Long> listener = trackStuckListener;
         if (listener != null) {
-            listener.accept(track, new FriendlyException("Track got stuck", FriendlyException.Severity.SUSPICIOUS, null));
+            listener.accept(track, thresholdMs);
+        } else {
+            nextTrack();
         }
-        nextTrack();
         notifyStateChanged();
+    }
+
+    private void startReplacement(AudioTrack track) {
+        playbackGeneration++;
+        clearRecoveryMarker();
+        player.setPaused(false);
+        player.startTrack(track, false);
+    }
+
+    private void clearRecoveryMarker() {
+        recoveringTrack = null;
+        recoveringGeneration = -1L;
+    }
+
+    private AudioTrack cloneWithUserData(AudioTrack track) {
+        AudioTrack clone = track.makeClone();
+        Object userData = track.getUserData();
+        clone.setUserData(userData instanceof TrackLoadContext context ? context.resetRecovery() : userData);
+        return clone;
     }
 
     private void notifyStateChanged() {

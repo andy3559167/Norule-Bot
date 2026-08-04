@@ -6,19 +6,23 @@ import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 
 import java.util.function.BiConsumer;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 public class GuildMusicManager {
     private final AudioPlayer player;
     private final TrackScheduler scheduler;
     private final AudioPlayerSendHandler sendHandler;
+    private final BooleanSupplier connectedChecker;
 
     public GuildMusicManager(AudioPlayerManager manager,
                              Runnable stateListener,
                              Consumer<AudioTrack> queueExhaustedListener,
                              Consumer<AudioTrack> trackStartListener,
                              Consumer<AudioTrack> trackEndListener,
-                             BiConsumer<AudioTrack, FriendlyException> trackExceptionListener) {
+                             BiConsumer<AudioTrack, FriendlyException> trackExceptionListener,
+                             BiConsumer<AudioTrack, Long> trackStuckListener,
+                             BooleanSupplier connectedChecker) {
         this.player = manager.createPlayer();
         this.scheduler = new TrackScheduler(player);
         this.scheduler.setStateListener(stateListener);
@@ -26,7 +30,9 @@ public class GuildMusicManager {
         this.scheduler.setTrackStartListener(trackStartListener);
         this.scheduler.setTrackEndListener(trackEndListener);
         this.scheduler.setTrackExceptionListener(trackExceptionListener);
+        this.scheduler.setTrackStuckListener(trackStuckListener);
         this.sendHandler = new AudioPlayerSendHandler(player);
+        this.connectedChecker = connectedChecker == null ? () -> true : connectedChecker;
         player.addListener(scheduler);
     }
 
@@ -40,6 +46,10 @@ public class GuildMusicManager {
 
     public AudioPlayerSendHandler getSendHandler() {
         return sendHandler;
+    }
+
+    public boolean isConnected() {
+        return connectedChecker.getAsBoolean();
     }
 }
 

@@ -300,7 +300,8 @@ public final class PlaylistCommandHandler {
                 event.getUser().getIdLong(),
                 event.getMember() == null ? event.getUser().getName() : event.getMember().getEffectiveName(),
                 added -> hook.sendMessage(formatAddResult(lang, playlistName, added)).queue(),
-                error -> hook.sendMessage(owner.musicText(lang, "playlist_add_failed", Map.of("reason", safe(error, 120)))).queue()
+                error -> hook.sendMessage(owner.musicText(lang, "playlist_add_failed",
+                        Map.of("reason", safe(owner.mapMusicLoadError(lang, error), 120)))).queue()
         ));
     }
 
@@ -430,7 +431,8 @@ public final class PlaylistCommandHandler {
                 event.getAuthor().getIdLong(),
                 event.getMember() == null ? event.getAuthor().getName() : event.getMember().getEffectiveName(),
                 added -> event.getChannel().sendMessage(formatAddResult(lang, resolvedPlaylistName, added)).queue(),
-                error -> event.getChannel().sendMessage(owner.musicUx(lang, "playlist_add_failed", Map.of("reason", safe(error, 120)))).queue()
+                error -> event.getChannel().sendMessage(owner.musicUx(lang, "playlist_add_failed",
+                        Map.of("reason", safe(owner.mapMusicLoadError(lang, error), 120)))).queue()
         );
     }
 
