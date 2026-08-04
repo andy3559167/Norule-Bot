@@ -40,10 +40,17 @@ public final class MusicPlaybackText {
     public String mapMusicLoadError(String lang, String rawError) {
         if ("SPOTIFY_RATE_LIMITED".equalsIgnoreCase(rawError)
                 || "SPOTIFY_PLAYLIST_COOLDOWN".equalsIgnoreCase(rawError)) {
-            return i18n().t(lang, "music.spotify_rate_limited");
+            return i18n().t(lang, "music.spotify_playlist_rate_limited");
         }
-        if ("SPOTIFY_PERSONAL_PLAYLIST_UNSUPPORTED".equalsIgnoreCase(rawError)) {
-            return i18n().t(lang, "music.spotify_personal_playlist_unsupported");
+        if ("SPOTIFY_RESTRICTED_OR_PERSONALIZED".equalsIgnoreCase(rawError)
+                || "SPOTIFY_PERSONAL_PLAYLIST_UNSUPPORTED".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.spotify_playlist_restricted");
+        }
+        if ("SPOTIFY_PLAYLIST_EMPTY".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.spotify_playlist_empty");
+        }
+        if ("SPOTIFY_AUTH_FAILED".equalsIgnoreCase(rawError)) {
+            return i18n().t(lang, "music.spotify_playlist_auth_failed");
         }
         if ("SPOTIFY_JAM_UNSUPPORTED".equalsIgnoreCase(rawError)) {
             return i18n().t(lang, "music.spotify_jam_unsupported");

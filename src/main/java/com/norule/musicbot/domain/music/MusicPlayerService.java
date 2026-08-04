@@ -73,7 +73,9 @@ public class MusicPlayerService {
     private static final int SPOTIFY_TIMEOUT_RETRY_MAX_ATTEMPTS = 2;
     private static final String SPOTIFY_RATE_LIMIT_ERROR_KEY = "SPOTIFY_RATE_LIMITED";
     private static final String SPOTIFY_PLAYLIST_COOLDOWN_ERROR_KEY = "SPOTIFY_PLAYLIST_COOLDOWN";
-    private static final String SPOTIFY_PERSONAL_PLAYLIST_ERROR_KEY = "SPOTIFY_PERSONAL_PLAYLIST_UNSUPPORTED";
+    private static final String SPOTIFY_RESTRICTED_PLAYLIST_ERROR_KEY = "SPOTIFY_RESTRICTED_OR_PERSONALIZED";
+    private static final String SPOTIFY_EMPTY_PLAYLIST_ERROR_KEY = "SPOTIFY_PLAYLIST_EMPTY";
+    private static final String SPOTIFY_AUTH_FAILED_ERROR_KEY = "SPOTIFY_AUTH_FAILED";
     private static final String SPOTIFY_UNSUPPORTED_LINK_ERROR_KEY = "SPOTIFY_UNSUPPORTED_LINK";
     private static final String SPOTIFY_JAM_UNSUPPORTED_ERROR_KEY = "SPOTIFY_JAM_UNSUPPORTED";
     private static final String SPOTIFY_SHOW_UNSUPPORTED_ERROR_KEY = "SPOTIFY_SHOW_UNSUPPORTED";
@@ -100,6 +102,7 @@ public class MusicPlayerService {
 
     private final AudioPlayerManager playerManager;
     private final MusicDataService musicDataService;
+    private final SpotifyPlaylistInspector spotifyPlaylistInspector;
     private final AudioInputClassifier inputClassifier = new AudioInputClassifier();
     private final AudioLoadFailureClassifier failureClassifier = new AudioLoadFailureClassifier();
     private final TrackRecoveryService trackRecoveryService;
@@ -151,6 +154,23 @@ public class MusicPlayerService {
                               LongToIntFunction playlistTrackLimitProvider,
                               MusicConfig globalMusicConfig,
                               Path sqliteDbPath) {
+        this(dataDir,
+                historyLimitProvider,
+                statsRetentionDaysProvider,
+                playlistTrackLimitProvider,
+                globalMusicConfig,
+                sqliteDbPath,
+                SpotifyPlaylistInspector.noOp());
+    }
+
+    @SuppressWarnings("deprecation")
+    public MusicPlayerService(Path dataDir,
+                              LongToIntFunction historyLimitProvider,
+                              LongToIntFunction statsRetentionDaysProvider,
+                              LongToIntFunction playlistTrackLimitProvider,
+                              MusicConfig globalMusicConfig,
+                              Path sqliteDbPath,
+                              SpotifyPlaylistInspector spotifyPlaylistInspector) {
         this.musicDataService = new MusicDataService(
                 dataDir,
                 historyLimitProvider,
@@ -158,6 +178,9 @@ public class MusicPlayerService {
                 playlistTrackLimitProvider,
                 sqliteDbPath
         );
+        this.spotifyPlaylistInspector = spotifyPlaylistInspector == null
+                ? SpotifyPlaylistInspector.noOp()
+                : spotifyPlaylistInspector;
         applyGlobalMusicConfig(globalMusicConfig == null ? MusicConfig.defaultValues() : globalMusicConfig);
         MusicConfig.Audio.Recovery recoveryConfig = audioConfig.getRecovery();
         this.trackRecoveryService = new TrackRecoveryService(
@@ -714,6 +737,21 @@ public class MusicPlayerService {
                       Long requesterId,
                       String requesterName,
                       int spotifyRateLimitRetryAttempt) {
+        load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel, allowFallback,
+                requesterId, requesterName, spotifyRateLimitRetryAttempt, false);
+    }
+
+    private void load(long guildId,
+                      GuildMusicManager guildMusicManager,
+                      Consumer<String> messageSender,
+                      String userInput,
+                      String identifier,
+                      String sourceLabel,
+                      boolean allowFallback,
+                      Long requesterId,
+                      String requesterName,
+                      int spotifyRateLimitRetryAttempt,
+                      boolean spotifyPlaylistInspected) {
         String inputError = validateInputForLoad(userInput);
         if (inputError != null) {
             messageSender.accept("LOAD_FAILED:" + inputError);
@@ -741,6 +779,21 @@ public class MusicPlayerService {
                     return;
                 }
             }
+        }
+        if (spotifySourceEnabled && isSpotifyPlaylistUrl(userInput) && !spotifyPlaylistInspected) {
+            inspectSpotifyPlaylistThenLoad(
+                    guildId,
+                    guildMusicManager,
+                    messageSender,
+                    userInput,
+                    identifier,
+                    sourceLabel,
+                    allowFallback,
+                    requesterId,
+                    requesterName,
+                    spotifyRateLimitRetryAttempt
+            );
+            return;
         }
         if (isYouTubePlaylistUrl(userInput)) {
             List<AudioTrack> cachedTracks = getCachedYoutubePlaylistTracks(userInput);
@@ -827,8 +880,17 @@ public class MusicPlayerService {
                     messageSender.accept("LOAD_FAILED:" + SPOTIFY_UNSUPPORTED_LINK_ERROR_KEY);
                     return;
                 }
+                if (looksLikeSpotifyUrl(userInput) && isSpotifyAuthFailure(exception)) {
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_AUTH_FAILED_ERROR_KEY);
+                    return;
+                }
+                if (looksLikeSpotifyUrl(userInput) && isSpotifyRateLimited(exception)) {
+                    applySpotifyRateLimitCooldown(guildId, requesterId);
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_RATE_LIMIT_ERROR_KEY);
+                    return;
+                }
                 if (isSpotifyPlaylistUrl(userInput) && isSpotifySecretFailure(exception)) {
-                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_PERSONAL_PLAYLIST_ERROR_KEY);
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_RESTRICTED_PLAYLIST_ERROR_KEY);
                     return;
                 }
                 if (looksLikeSpotifyUrl(userInput)
@@ -841,16 +903,8 @@ public class MusicPlayerService {
                             SPOTIFY_TIMEOUT_RETRY_MAX_ATTEMPTS,
                             sanitizeInputForLog(userInput)
                     );
-                    load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel, allowFallback, requesterId, requesterName, nextAttempt);
-                    return;
-                }
-                if (looksLikeSpotifyUrl(userInput) && isSpotifyRateLimited(exception)) {
-                    long cooldownUntil = System.currentTimeMillis() + SPOTIFY_RATE_LIMIT_COOLDOWN_MS;
-                    spotifyRateLimitGuildCooldownUntil.put(guildId, cooldownUntil);
-                    if (requesterId != null) {
-                        spotifyRateLimitUserCooldownUntil.put(requesterId, cooldownUntil);
-                    }
-                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_RATE_LIMIT_ERROR_KEY);
+                    load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel,
+                            allowFallback, requesterId, requesterName, nextAttempt, true);
                     return;
                 }
                 if (looksLikeSpotifyOrShareUrl(userInput) && isUnknownFileFormat(exception)) {
@@ -872,6 +926,85 @@ public class MusicPlayerService {
                 }
             }
         });
+    }
+
+    private void inspectSpotifyPlaylistThenLoad(long guildId,
+                                                GuildMusicManager guildMusicManager,
+                                                Consumer<String> messageSender,
+                                                String userInput,
+                                                String identifier,
+                                                String sourceLabel,
+                                                boolean allowFallback,
+                                                Long requesterId,
+                                                String requesterName,
+                                                int spotifyRateLimitRetryAttempt) {
+        try {
+            spotifyPlaylistInspector.inspect(userInput, "queue/load guild=" + guildId, spotifyConfig)
+                    .whenComplete((inspection, error) -> {
+                        if (error != null) {
+                            LOGGER.warn(
+                                    "[NoRule] Spotify playlist preflight failed unexpectedly: context=queue/load guild={} input={} reason={}",
+                                    guildId,
+                                    sanitizeInputForLog(userInput),
+                                    rootCauseDetails(error)
+                            );
+                        } else if (handleSpotifyPlaylistInspection(
+                                inspection,
+                                guildId,
+                                requesterId,
+                                messageSender
+                        )) {
+                            return;
+                        }
+                        load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel,
+                                allowFallback, requesterId, requesterName, spotifyRateLimitRetryAttempt, true);
+                    });
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "[NoRule] Spotify playlist preflight could not start: context=queue/load guild={} input={} reason={}",
+                    guildId,
+                    sanitizeInputForLog(userInput),
+                    rootCauseDetails(exception)
+            );
+            load(guildId, guildMusicManager, messageSender, userInput, identifier, sourceLabel,
+                    allowFallback, requesterId, requesterName, spotifyRateLimitRetryAttempt, true);
+        }
+    }
+
+    private boolean handleSpotifyPlaylistInspection(SpotifyPlaylistInspector.Inspection inspection,
+                                                    long guildId,
+                                                    Long requesterId,
+                                                    Consumer<String> messageSender) {
+        if (inspection == null || inspection.outcome() == SpotifyPlaylistInspector.Outcome.UNAVAILABLE) {
+            return false;
+        }
+        switch (inspection.outcome()) {
+            case READABLE -> {
+                return false;
+            }
+            case SPOTIFY_PLAYLIST_EMPTY ->
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_EMPTY_PLAYLIST_ERROR_KEY);
+            case SPOTIFY_RESTRICTED_OR_PERSONALIZED ->
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_RESTRICTED_PLAYLIST_ERROR_KEY);
+            case SPOTIFY_AUTH_FAILED ->
+                    messageSender.accept("LOAD_FAILED:" + SPOTIFY_AUTH_FAILED_ERROR_KEY);
+            case SPOTIFY_RATE_LIMITED -> {
+                applySpotifyRateLimitCooldown(guildId, requesterId);
+                messageSender.accept("LOAD_FAILED:" + SPOTIFY_RATE_LIMIT_ERROR_KEY);
+            }
+            case UNAVAILABLE -> {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void applySpotifyRateLimitCooldown(long guildId, Long requesterId) {
+        long cooldownUntil = System.currentTimeMillis() + SPOTIFY_RATE_LIMIT_COOLDOWN_MS;
+        spotifyRateLimitGuildCooldownUntil.put(guildId, cooldownUntil);
+        if (requesterId != null) {
+            spotifyRateLimitUserCooldownUntil.put(requesterId, cooldownUntil);
+        }
     }
 
     private YouTubePlaybackPrecheckResult precheckTrack(AudioTrack track, String sourceLabel) {
@@ -1051,6 +1184,24 @@ public class MusicPlayerService {
                 if (lower.contains("failed to retrieve secret")
                         || lower.contains("no secret found")
                         || lower.contains("no secret array found")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private boolean isSpotifyAuthFailure(FriendlyException exception) {
+        Throwable current = exception;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null) {
+                String lower = message.toLowerCase();
+                if (lower.contains("unauthorized")
+                        || lower.contains("invalid_client")
+                        || lower.contains("response code from channel info is 401")
+                        || lower.contains(" 401")) {
                     return true;
                 }
             }
