@@ -1,5 +1,6 @@
 package com.norule.musicbot.discord.bot.gateway.panel;
 
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.discord.bot.app.MusicCommandService;
 import com.norule.musicbot.domain.music.MusicPlayerService;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
@@ -55,19 +56,51 @@ public final class MusicPanelRenderer {
                 + "\n\uD83E\uDDE0 **" + owner.musicUx(lang, "panel_autoplay") + "**: " + autoplayState;
         EmbedBuilder builder = new EmbedBuilder()
                 .setColor(current == null ? new Color(99, 110, 114) : new Color(22, 160, 133))
-                .setTitle("\uD83C\uDFB5 " + owner.musicUx(lang, "panel_title"))
-                .setDescription(summaryLine)
-                .addField("\uD83C\uDFA7 " + owner.musicUx(lang, "panel_current"), currentText, false)
-                .addField("\uD83D\uDC64 " + owner.musicUx(lang, "panel_requester"), requester, true)
-                .addField("\uD83C\uDFA4 " + owner.musicUx(lang, "panel_author"), author, true)
-                .addField("\uD83D\uDD17 " + owner.musicUx(lang, "panel_source"), source, true)
-                .addField("\u23F1\uFE0F " + owner.musicUx(lang, "panel_duration"), current == null ? owner.musicUx(lang, "panel_none") : formatDuration(duration), true)
-                .addField("\uD83D\uDCCA " + owner.musicUx(lang, "panel_progress"), progress, false)
-                .addField("\uD83D\uDCC3 " + owner.musicUx(lang, "panel_queue"), queueText, false)
-                .setFooter("\u21BB " + owner.musicUx(lang, "btn_refresh"))
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle("\uD83C\uDFB5 " + owner.musicUx(lang, "panel_title")))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(summaryLine))
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName("\uD83C\uDFA7 " + owner.musicUx(lang, "panel_current")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(currentText),
+                        false
+                )
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName("\uD83D\uDC64 " + owner.musicUx(lang, "panel_requester")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(requester),
+                        true
+                )
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName("\uD83C\uDFA4 " + owner.musicUx(lang, "panel_author")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(author),
+                        true
+                )
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName("\uD83D\uDD17 " + owner.musicUx(lang, "panel_source")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(source),
+                        true
+                )
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName("\u23F1\uFE0F " + owner.musicUx(lang, "panel_duration")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(current == null ? owner.musicUx(lang, "panel_none") : formatDuration(duration)),
+                        true
+                )
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName("\uD83D\uDCCA " + owner.musicUx(lang, "panel_progress")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(progress),
+                        false
+                )
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName("\uD83D\uDCC3 " + owner.musicUx(lang, "panel_queue")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(queueText),
+                        false
+                )
+                .setFooter(DiscordEmbedSanitizer.sanitizeFooter("\u21BB " + owner.musicUx(lang, "btn_refresh")))
                 .setTimestamp(Instant.now());
         if (autoplayNotice != null && !autoplayNotice.isBlank()) {
-            builder.addField(owner.musicUx(lang, "panel_autoplay_notice"), formatAutoplayNotice(lang, autoplayNotice), false);
+            builder.addField(
+                    DiscordEmbedSanitizer.sanitizeFieldName(owner.musicUx(lang, "panel_autoplay_notice")),
+                    DiscordEmbedSanitizer.sanitizeFieldValue(formatAutoplayNotice(lang, autoplayNotice)),
+                    false
+            );
         }
         if (artwork != null && !artwork.isBlank()) {
             builder.setImage(artwork);
@@ -185,6 +218,6 @@ public final class MusicPanelRenderer {
         if (value == null || value.isBlank()) {
             return "-";
         }
-        return value.length() <= max ? value : value.substring(0, max - 1);
+        return DiscordEmbedSanitizer.truncate(value, max);
     }
 }

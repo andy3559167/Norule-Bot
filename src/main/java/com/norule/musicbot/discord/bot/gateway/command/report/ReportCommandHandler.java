@@ -1,5 +1,6 @@
 package com.norule.musicbot.discord.bot.gateway.command.report;
 
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.discord.bot.gateway.command.CommandOptions;
 import com.norule.musicbot.discord.bot.gateway.component.ComponentIds;
 import com.norule.musicbot.i18n.I18nService;
@@ -235,7 +236,7 @@ public final class ReportCommandHandler {
         if (value == null || value.isBlank()) {
             return "-";
         }
-        return value.length() <= MAX_EMBED_FIELD ? value : value.substring(0, MAX_EMBED_FIELD - 1);
+        return DiscordEmbedSanitizer.truncate(value, MAX_EMBED_FIELD);
     }
 
     private static String normalizeType(String raw) {

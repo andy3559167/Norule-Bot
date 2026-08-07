@@ -3,6 +3,7 @@ package com.norule.musicbot.discord.bot.service.meta;
 import com.norule.musicbot.ShortUrlService;
 import com.norule.musicbot.config.domain.RuntimeConfigSnapshot;
 import com.norule.musicbot.discord.bot.gateway.component.ComponentIds;
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
 import net.dv8tion.jda.api.Permission;
@@ -443,13 +444,13 @@ public final class DevService {
     private EmbedBuilder developerErrorEmbed(String message) {
         return developerBaseEmbed("Developer Command")
                 .setColor(new Color(231, 76, 60))
-                .setDescription(message);
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(message));
     }
 
     private EmbedBuilder developerBaseEmbed(String title) {
         return new EmbedBuilder()
                 .setColor(new Color(52, 152, 219))
-                .setTitle(title)
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(title))
                 .setTimestamp(Instant.now());
     }
 

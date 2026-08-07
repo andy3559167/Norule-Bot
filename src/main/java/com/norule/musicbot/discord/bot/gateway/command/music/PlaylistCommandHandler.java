@@ -3,6 +3,7 @@ package com.norule.musicbot.discord.bot.gateway.command.music;
 import com.norule.musicbot.discord.bot.app.MusicCommandService;
 import com.norule.musicbot.discord.bot.gateway.command.routing.DiscordCommandRouteMapper;
 import com.norule.musicbot.discord.bot.gateway.panel.MusicPanelController;
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.domain.music.MusicDataService;
 
 import net.dv8tion.jda.api.EmbedBuilder;
@@ -752,13 +753,17 @@ public final class PlaylistCommandHandler {
         }
         return new EmbedBuilder()
                 .setColor(new Color(46, 204, 113))
-                .setTitle("\uD83D\uDCC1 " + owner.musicText(lang, "playlist_title"))
-                .setDescription(description)
-                .addField(owner.musicText(lang, "playlist_field"), body, false)
-                .setFooter(owner.musicText(lang, "playlist_page_indicator", Map.of(
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle("\uD83D\uDCC1 " + owner.musicText(lang, "playlist_title")))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(description))
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName(owner.musicText(lang, "playlist_field")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(body),
+                        false
+                )
+                .setFooter(DiscordEmbedSanitizer.sanitizeFooter(owner.musicText(lang, "playlist_page_indicator", Map.of(
                         "current", String.valueOf(Math.max(1, Math.min(page + 1, Math.max(1, (playlists.size() + LIST_PAGE_SIZE - 1) / LIST_PAGE_SIZE)))),
                         "total", String.valueOf(Math.max(1, (playlists.size() + LIST_PAGE_SIZE - 1) / LIST_PAGE_SIZE))
-                )))
+                ))))
                 .setTimestamp(Instant.now());
     }
 
@@ -862,7 +867,7 @@ public final class PlaylistCommandHandler {
         if (s == null || s.isBlank()) {
             return "-";
         }
-        return s.length() <= max ? s : s.substring(0, max - 1);
+        return DiscordEmbedSanitizer.truncate(s, max);
     }
 
     private String formatDuration(long millis) {

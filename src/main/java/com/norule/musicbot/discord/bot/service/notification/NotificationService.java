@@ -1,6 +1,7 @@
 package com.norule.musicbot.discord.bot.service.notification;
 
 import com.norule.musicbot.config.*;
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.i18n.*;
 
 import net.dv8tion.jda.api.EmbedBuilder;
@@ -134,15 +135,23 @@ public class NotificationService {
                     : i18n.t(lang, "notifications.embed.member_leave_title");
             EmbedBuilder eb = new EmbedBuilder()
                     .setColor(new Color(color & 0xFFFFFF))
-                    .setTitle(title)
-                    .setDescription(message)
-                    .addField(i18n.t(lang, "notifications.embed.user_field"), user.getAsMention() + " (`" + user.getAsTag() + "`)", false)
-                    .addField("ID", user.getId(), true)
-                    .addField(i18n.t(lang, "notifications.embed.account_created_field"), discordCreatedAt(createdAt), true)
-                    .addField(i18n.t(lang, joinEvent
+                    .setTitle(DiscordEmbedSanitizer.sanitizeTitle(title))
+                    .setDescription(DiscordEmbedSanitizer.sanitizeDescription(message))
+                    .addField(
+                            DiscordEmbedSanitizer.sanitizeFieldName(i18n.t(lang, "notifications.embed.user_field")),
+                            DiscordEmbedSanitizer.sanitizeFieldValue(user.getAsMention() + " (`" + user.getAsTag() + "`)"),
+                            false
+                    )
+                    .addField("ID", DiscordEmbedSanitizer.sanitizeFieldValue(user.getId()), true)
+                    .addField(
+                            DiscordEmbedSanitizer.sanitizeFieldName(i18n.t(lang, "notifications.embed.account_created_field")),
+                            DiscordEmbedSanitizer.sanitizeFieldValue(discordCreatedAt(createdAt)),
+                            true
+                    )
+                    .addField(DiscordEmbedSanitizer.sanitizeFieldName(i18n.t(lang, joinEvent
                                     ? "notifications.embed.join_notify_time_field"
-                                    : "notifications.embed.leave_notify_time_field"),
-                            discordTimestamp(now),
+                                    : "notifications.embed.leave_notify_time_field")),
+                            DiscordEmbedSanitizer.sanitizeFieldValue(discordTimestamp(now)),
                             false
                     );
             if (joinEvent) {
@@ -198,10 +207,10 @@ public class NotificationService {
     private EmbedBuilder buildWelcomeEmbed(Guild guild, User user, String title, String message, String thumbnailUrl, String imageUrl) {
         EmbedBuilder eb = new EmbedBuilder()
                 .setColor(new Color(0x2ECC71))
-                .setTitle(title)
-                .setDescription(message)
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(title))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(message))
                 .setTimestamp(Instant.now())
-                .setFooter(guild.getName(), guild.getIconUrl());
+                .setFooter(DiscordEmbedSanitizer.sanitizeFooter(guild.getName()), guild.getIconUrl());
         eb.setThumbnail(thumbnailUrl != null ? thumbnailUrl : user.getEffectiveAvatarUrl());
         if (imageUrl != null) {
             eb.setImage(imageUrl);
@@ -247,8 +256,12 @@ public class NotificationService {
         }
         EmbedBuilder eb = new EmbedBuilder()
                 .setColor(new Color(color & 0xFFFFFF))
-                .setTitle(title == null || title.isBlank() ? i18n.t(lang, "notifications.embed.voice_move_title") : title)
-                .setDescription(message);
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(
+                        title == null || title.isBlank()
+                                ? i18n.t(lang, "notifications.embed.voice_move_title")
+                                : title
+                ))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(message));
         channel.sendMessageEmbeds(eb.build()).queue();
     }
 
@@ -368,7 +381,6 @@ public class NotificationService {
         return "<t:" + sec + ":S> (<t:" + sec + ":R>)";
     }
 }
-
 
 
 

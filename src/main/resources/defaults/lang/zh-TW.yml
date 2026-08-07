@@ -570,6 +570,7 @@ logs:
   user: "使用者"
   role_added: "新增身分組"
   role_removed: "移除身分組"
+  roles_more: "…以及另外 {count} 個身分組"
   roles: "身分組"
   channel_created: "頻道已建立"
   channel_deleted: "頻道已刪除"

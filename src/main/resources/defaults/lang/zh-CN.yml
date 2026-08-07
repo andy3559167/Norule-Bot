@@ -570,6 +570,7 @@ logs:
   user: "用户"
   role_added: "新增身份组"
   role_removed: "移除身份组"
+  roles_more: "…以及另外 {count} 个身份组"
   roles: "身份组"
   channel_created: "频道已创建"
   channel_deleted: "频道已删除"

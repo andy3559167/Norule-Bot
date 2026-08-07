@@ -11,6 +11,7 @@ import java.util.Set;
 
 public class BotConfig {
     private final String token;
+    private final Discord discord;
     private final String prefix;
     private final boolean debug;
     private final Long commandGuildId;
@@ -30,10 +31,12 @@ public class BotConfig {
     private final Ticket ticket;
     private final ShortUrl shortUrl;
     private final MinecraftStatus minecraftStatus;
+    private final Dictionary dictionary;
     private final Web web;
     private final Stats stats;
 
     public BotConfig(String token,
+                      Discord discord,
                       String prefix,
                       boolean debug,
                       Long commandGuildId,
@@ -53,9 +56,11 @@ public class BotConfig {
                       Ticket ticket,
                       ShortUrl shortUrl,
                       MinecraftStatus minecraftStatus,
+                      Dictionary dictionary,
                       Web web,
                       Stats stats) {
         this.token = token;
+        this.discord = discord == null ? Discord.defaultValues() : discord;
         this.prefix = prefix;
         this.debug = debug;
         this.commandGuildId = commandGuildId;
@@ -75,6 +80,7 @@ public class BotConfig {
         this.ticket = ticket;
         this.shortUrl = shortUrl;
         this.minecraftStatus = minecraftStatus == null ? MinecraftStatus.defaultValues() : minecraftStatus;
+        this.dictionary = dictionary == null ? Dictionary.defaultValues() : dictionary;
         this.web = web;
         this.stats = stats;
     }
@@ -83,6 +89,10 @@ public class BotConfig {
 
 public String getToken() {
         return token;
+    }
+
+    public Discord getDiscord() {
+        return discord;
     }
 
     public String getPrefix() {
@@ -361,12 +371,261 @@ public String getToken() {
         return minecraftStatus;
     }
 
+    public Dictionary getDictionary() {
+        return dictionary;
+    }
+
     public Web getWeb() {
         return web;
     }
 
     public Stats getStats() {
         return stats;
+    }
+
+    public static final class Discord {
+        private final LoginRetry loginRetry;
+
+        private Discord(LoginRetry loginRetry) {
+            this.loginRetry = loginRetry == null ? LoginRetry.defaultValues() : loginRetry;
+        }
+
+        public static Discord fromMap(Map<String, Object> map, Discord fallback) {
+            Discord defaults = fallback == null ? defaultValues() : fallback;
+            return new Discord(LoginRetry.fromMap(
+                    asMap(map.get("loginRetry")),
+                    defaults.getLoginRetry()
+            ));
+        }
+
+        public static Discord defaultValues() {
+            return new Discord(LoginRetry.defaultValues());
+        }
+
+        public LoginRetry getLoginRetry() {
+            return loginRetry;
+        }
+
+        public static final class LoginRetry {
+            public static final boolean DEFAULT_ENABLED = true;
+            public static final int DEFAULT_MAX_ATTEMPTS = 8;
+            public static final int DEFAULT_INITIAL_DELAY_SECONDS = 5;
+            public static final int DEFAULT_MAX_DELAY_SECONDS = 60;
+
+            private final boolean enabled;
+            private final int maxAttempts;
+            private final int initialDelaySeconds;
+            private final int maxDelaySeconds;
+
+            private LoginRetry(boolean enabled,
+                               int maxAttempts,
+                               int initialDelaySeconds,
+                               int maxDelaySeconds) {
+                this.enabled = enabled;
+                this.maxAttempts = positiveOrDefault(maxAttempts, DEFAULT_MAX_ATTEMPTS);
+                this.initialDelaySeconds = nonNegativeOrDefault(
+                        initialDelaySeconds,
+                        DEFAULT_INITIAL_DELAY_SECONDS
+                );
+                this.maxDelaySeconds = Math.max(
+                        this.initialDelaySeconds,
+                        nonNegativeOrDefault(maxDelaySeconds, DEFAULT_MAX_DELAY_SECONDS)
+                );
+            }
+
+            public static LoginRetry fromMap(Map<String, Object> map, LoginRetry fallback) {
+                LoginRetry defaults = fallback == null ? defaultValues() : fallback;
+                return new LoginRetry(
+                        getBoolean(map, "enabled", defaults.isEnabled()),
+                        getInt(map, "maxAttempts", defaults.getMaxAttempts()),
+                        getInt(map, "initialDelaySeconds", defaults.getInitialDelaySeconds()),
+                        getInt(map, "maxDelaySeconds", defaults.getMaxDelaySeconds())
+                );
+            }
+
+            public static LoginRetry defaultValues() {
+                return new LoginRetry(
+                        DEFAULT_ENABLED,
+                        DEFAULT_MAX_ATTEMPTS,
+                        DEFAULT_INITIAL_DELAY_SECONDS,
+                        DEFAULT_MAX_DELAY_SECONDS
+                );
+            }
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public int getMaxAttempts() {
+                return maxAttempts;
+            }
+
+            public int getInitialDelaySeconds() {
+                return initialDelaySeconds;
+            }
+
+            public int getMaxDelaySeconds() {
+                return maxDelaySeconds;
+            }
+
+            private static int positiveOrDefault(int value, int defaultValue) {
+                return value > 0 ? value : defaultValue;
+            }
+
+            private static int nonNegativeOrDefault(int value, int defaultValue) {
+                return value >= 0 ? value : defaultValue;
+            }
+        }
+    }
+
+    public static final class Dictionary {
+        public static final int DEFAULT_CONNECT_TIMEOUT_SECONDS = 5;
+        public static final int DEFAULT_REQUEST_TIMEOUT_SECONDS = 5;
+
+        private final int connectTimeoutSeconds;
+        private final int requestTimeoutSeconds;
+        private final FreeDictionary freeDictionary;
+        private final MerriamWebster merriamWebster;
+
+        private Dictionary(int connectTimeoutSeconds,
+                           int requestTimeoutSeconds,
+                           FreeDictionary freeDictionary,
+                           MerriamWebster merriamWebster) {
+            this.connectTimeoutSeconds = positiveOrDefault(
+                    connectTimeoutSeconds,
+                    DEFAULT_CONNECT_TIMEOUT_SECONDS
+            );
+            this.requestTimeoutSeconds = positiveOrDefault(
+                    requestTimeoutSeconds,
+                    DEFAULT_REQUEST_TIMEOUT_SECONDS
+            );
+            this.freeDictionary = freeDictionary == null ? FreeDictionary.defaultValues() : freeDictionary;
+            this.merriamWebster = merriamWebster == null ? MerriamWebster.defaultValues() : merriamWebster;
+        }
+
+        public static Dictionary fromMap(Map<String, Object> map, Dictionary fallback) {
+            Dictionary defaults = fallback == null ? defaultValues() : fallback;
+            return new Dictionary(
+                    getInt(map, "connectTimeoutSeconds", defaults.getConnectTimeoutSeconds()),
+                    getInt(map, "requestTimeoutSeconds", defaults.getRequestTimeoutSeconds()),
+                    FreeDictionary.fromMap(asMap(map.get("freeDictionary")), defaults.getFreeDictionary()),
+                    MerriamWebster.fromMap(asMap(map.get("merriamWebster")), defaults.getMerriamWebster())
+            );
+        }
+
+        public static Dictionary defaultValues() {
+            return new Dictionary(
+                    DEFAULT_CONNECT_TIMEOUT_SECONDS,
+                    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+                    FreeDictionary.defaultValues(),
+                    MerriamWebster.defaultValues()
+            );
+        }
+
+        public int getConnectTimeoutSeconds() {
+            return connectTimeoutSeconds;
+        }
+
+        public int getRequestTimeoutSeconds() {
+            return requestTimeoutSeconds;
+        }
+
+        public FreeDictionary getFreeDictionary() {
+            return freeDictionary;
+        }
+
+        public MerriamWebster getMerriamWebster() {
+            return merriamWebster;
+        }
+
+        public static final class FreeDictionary {
+            public static final String DEFAULT_ENDPOINT =
+                    "https://api.dictionaryapi.dev/api/v2/entries/en/";
+
+            private final boolean enabled;
+            private final String endpoint;
+
+            private FreeDictionary(boolean enabled, String endpoint) {
+                this.enabled = enabled;
+                this.endpoint = normalizeEndpoint(endpoint, DEFAULT_ENDPOINT);
+            }
+
+            public static FreeDictionary fromMap(Map<String, Object> map, FreeDictionary fallback) {
+                FreeDictionary defaults = fallback == null ? defaultValues() : fallback;
+                return new FreeDictionary(
+                        getBoolean(map, "enabled", defaults.isEnabled()),
+                        getString(map, "endpoint", defaults.getEndpoint())
+                );
+            }
+
+            public static FreeDictionary defaultValues() {
+                return new FreeDictionary(true, DEFAULT_ENDPOINT);
+            }
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public String getEndpoint() {
+                return endpoint;
+            }
+        }
+
+        public static final class MerriamWebster {
+            public static final String DEFAULT_ENDPOINT =
+                    "https://www.dictionaryapi.com/api/v3/references/collegiate/json/";
+
+            private final boolean enabled;
+            private final String endpoint;
+            private final String apiKey;
+
+            private MerriamWebster(boolean enabled, String endpoint, String apiKey) {
+                this.enabled = enabled;
+                this.endpoint = normalizeEndpoint(endpoint, DEFAULT_ENDPOINT);
+                this.apiKey = nullToEmpty(apiKey);
+            }
+
+            public static MerriamWebster fromMap(Map<String, Object> map, MerriamWebster fallback) {
+                MerriamWebster defaults = fallback == null ? defaultValues() : fallback;
+                return new MerriamWebster(
+                        getBoolean(map, "enabled", defaults.isEnabled()),
+                        getString(map, "endpoint", defaults.getEndpoint()),
+                        getString(map, "apiKey", defaults.getApiKey())
+                );
+            }
+
+            public static MerriamWebster defaultValues() {
+                return new MerriamWebster(true, DEFAULT_ENDPOINT, "");
+            }
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public boolean isAvailable() {
+                return enabled && !apiKey.isBlank();
+            }
+
+            public String getEndpoint() {
+                return endpoint;
+            }
+
+            public String getApiKey() {
+                return apiKey;
+            }
+        }
+
+        private static int positiveOrDefault(int value, int defaultValue) {
+            return value > 0 ? value : defaultValue;
+        }
+
+        private static String normalizeEndpoint(String endpoint, String defaultEndpoint) {
+            String normalized = nullToEmpty(endpoint);
+            if (normalized.isBlank()) {
+                return defaultEndpoint;
+            }
+            return normalized.endsWith("/") ? normalized : normalized + "/";
+        }
     }
 
     public static class Stats {

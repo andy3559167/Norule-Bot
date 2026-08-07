@@ -1,6 +1,7 @@
 package com.norule.musicbot.discord.bot.service.wordchain;
 
 import com.norule.musicbot.discord.bot.gateway.wordchain.DictionaryApiGateway;
+import com.norule.musicbot.discord.bot.gateway.wordchain.FallbackDictionaryApiGateway;
 import com.norule.musicbot.domain.wordchain.DictionaryLookupResult;
 import com.norule.musicbot.domain.wordchain.WordChainLeaderboardEntry;
 import com.norule.musicbot.domain.wordchain.WordChainPlayerStatsSnapshot;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -99,24 +101,30 @@ class WordChainServiceTest {
     }
 
     @Test
-    void duplicateWordIncludesOriginalUserAndUsageTimeAfterReload() throws Exception {
+    void duplicateWordAfterReloadSkipsBothProvidersAndIncludesOriginalUsage() throws Exception {
         Path dir = Files.createTempDirectory("wordchain-usage");
-        FakeGateway gateway = new FakeGateway();
-        gateway.set("apple", DictionaryLookupResult.FOUND, 0);
+        FakeGateway primary = new FakeGateway();
+        FakeGateway fallback = new FakeGateway();
+        primary.set("apple", DictionaryLookupResult.NOT_FOUND, 0);
+        fallback.set("apple", DictionaryLookupResult.FOUND, 0);
         WordChainService service = new WordChainService(
                 new WordChainStateRepository(dir),
-                new DictionaryApiService(gateway)
+                new DictionaryApiService(new FallbackDictionaryApiGateway(primary, fallback, true))
         );
         service.setChannel(17L, 170L).join();
         service.processMessage(17L, 170L, 123L, "apple").join();
+        assertEquals(1, primary.calls("apple"));
+        assertEquals(1, fallback.calls("apple"));
 
         WordChainService reloaded = new WordChainService(
                 new WordChainStateRepository(dir),
-                new DictionaryApiService(gateway)
+                new DictionaryApiService(new FallbackDictionaryApiGateway(primary, fallback, true))
         );
         WordChainProcessResult duplicate = reloaded.processMessage(17L, 170L, 456L, "apple").join();
 
         assertEquals(WordChainValidationResult.WORD_USED, duplicate.result());
+        assertEquals(1, primary.calls("apple"));
+        assertEquals(1, fallback.calls("apple"));
         assertNotNull(duplicate.priorWordUsage());
         assertEquals(123L, duplicate.priorWordUsage().userId());
         assertNotNull(duplicate.priorWordUsage().usedAt());
@@ -240,13 +248,19 @@ class WordChainServiceTest {
         }
 
         private final Map<String, Reply> replies = new ConcurrentHashMap<>();
+        private final Map<String, AtomicInteger> calls = new ConcurrentHashMap<>();
 
         void set(String word, DictionaryLookupResult result, long delayMillis) {
             replies.put(word, new Reply(result, delayMillis));
         }
 
+        int calls(String word) {
+            return calls.getOrDefault(word, new AtomicInteger()).get();
+        }
+
         @Override
         public CompletableFuture<DictionaryLookupResult> lookup(String word) {
+            calls.computeIfAbsent(word, ignored -> new AtomicInteger()).incrementAndGet();
             Reply reply = replies.getOrDefault(word, new Reply(DictionaryLookupResult.NOT_FOUND, 0));
             CompletableFuture<DictionaryLookupResult> future = new CompletableFuture<>();
             if (reply.delayMillis <= 0) {

@@ -566,6 +566,7 @@ logs:
   user: "User"
   role_added: "Roles Added"
   role_removed: "Roles Removed"
+  roles_more: "…and {count} more roles"
   roles: "Roles"
   channel_created: "Channel Created"
   channel_deleted: "Channel Deleted"

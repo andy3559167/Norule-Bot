@@ -9,6 +9,7 @@ import com.norule.musicbot.discord.bot.gateway.command.settings.menu.SettingsRes
 import com.norule.musicbot.discord.bot.gateway.command.settings.menu.SettingsTemplateMenuHandler;
 import com.norule.musicbot.discord.bot.gateway.command.settings.view.SettingsInfoView;
 import com.norule.musicbot.discord.bot.gateway.component.ComponentIds;
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.components.selections.EntitySelectMenu;
@@ -426,8 +427,10 @@ public final class SettingsCommandHandler {
     private EmbedBuilder logSettingsStatusEmbed(String lang, Color color, String description) {
         return new EmbedBuilder()
                 .setColor(color)
-                .setTitle(owner.i18nService().t(lang, "settings.log_settings.title"))
-                .setDescription(description);
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(
+                        owner.i18nService().t(lang, "settings.log_settings.title")
+                ))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(description));
     }
 
     private String logSettingsRemoveMemberLabel(String lang) {

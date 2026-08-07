@@ -14,7 +14,10 @@ import com.norule.musicbot.i18n.*;
 import com.norule.musicbot.discord.bot.gateway.WordChainMessageListener;
 import com.norule.musicbot.discord.bot.gateway.command.shorturl.DiscordShortUrlAccessPublisher;
 import com.norule.musicbot.discord.bot.gateway.listener.*;
-import com.norule.musicbot.discord.bot.gateway.wordchain.DictionaryApiHttpGateway;
+import com.norule.musicbot.discord.bot.gateway.wordchain.DictionaryApiGateway;
+import com.norule.musicbot.discord.bot.gateway.wordchain.FallbackDictionaryApiGateway;
+import com.norule.musicbot.discord.bot.gateway.wordchain.FreeDictionaryApiGateway;
+import com.norule.musicbot.discord.bot.gateway.wordchain.MerriamWebsterDictionaryApiGateway;
 import com.norule.musicbot.discord.bot.ops.wordchain.WordChainOps;
 import com.norule.musicbot.discord.bot.service.cache.*;
 import com.norule.musicbot.discord.bot.service.wordchain.DictionaryApiService;
@@ -73,10 +76,12 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.Reader;
+import java.net.http.HttpClient;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -116,6 +121,7 @@ public final class RuntimeBootstrap {
     private static final long DEFAULT_CLEAR_RETENTION_MILLIS = 7L * 24L * 60L * 60L * 1000L;
     private static final Pattern RETENTION_SEGMENT_PATTERN = Pattern.compile("(\\d+)([dhms])");
     private static final AtomicBoolean SHUTDOWN_STARTED = new AtomicBoolean(false);
+    private static final AtomicBoolean MISSING_MERRIAM_WEBSTER_KEY_WARNING_LOGGED = new AtomicBoolean(false);
     private static final AtomicReference<ScheduledExecutorService> PRESENCE_ROTATION = new AtomicReference<>();
     private static final AtomicReference<BotConfig> RUNTIME_CONFIG = new AtomicReference<>();
     private static final AtomicReference<RuntimeConfigSnapshot> RUNTIME_SNAPSHOT = new AtomicReference<>();
@@ -185,7 +191,7 @@ public final class RuntimeBootstrap {
         ModerationService moderationService = new ModerationService(moderationDataPath, moderationSqliteRepository);
         WordChainService wordChainService = new WordChainService(
                 new WordChainStateRepository(moderationDataPath.resolve("wordchain")),
-                new DictionaryApiService(new DictionaryApiHttpGateway())
+                new DictionaryApiService(createDictionaryApiGateway(config.getDictionary()))
         );
         WordChainOps wordChainOps = new WordChainOps(wordChainService);
         HoneypotSqliteRepository honeypotSqliteRepository = sharedSqliteDatabase == null ? null : new HoneypotSqliteRepository(sharedSqliteDatabase);
@@ -225,45 +231,57 @@ public final class RuntimeBootstrap {
                 wordChainOps
         );
 
-        AudioModuleConfig audioConfig = new AudioModuleConfig()
-                .withDaveSessionFactory(new LDJDADaveSessionFactory(new NativeDaveFactory()));
-
-        JDABuilder builder = JDABuilder.createDefault(
-                        token,
-                        GatewayIntent.GUILD_MESSAGES,
-                        GatewayIntent.DIRECT_MESSAGES,
-                        GatewayIntent.MESSAGE_CONTENT,
-                        GatewayIntent.GUILD_MEMBERS,
-                        GatewayIntent.GUILD_VOICE_STATES,
-                        GatewayIntent.GUILD_MODERATION
-                )
-                .setAudioModuleConfig(audioConfig)
-                .setMemberCachePolicy(MemberCachePolicy.VOICE.or(MemberCachePolicy.OWNER))
-                .setChunkingFilter(ChunkingFilter.NONE)
-                .disableCache(CacheFlag.EMOJI, CacheFlag.STICKER, CacheFlag.SCHEDULED_EVENTS)
-                .setStatus(parseOnlineStatus(config.getBotProfile().getPresenceStatus()))
-                .setActivity(null)
-                .addEventListeners(
-                        musicCommandListener,
-                        new NotificationListener(guildSettingsService, i18nService),
-                        new MessageLogListener(guildSettingsService, i18nService, messageLogCacheRepository),
-                        new ServerLogListener(guildSettingsService, i18nService, moderationService),
-                        new DuplicateMessageListener(guildSettingsService, moderationService, i18nService, duplicateMessageCacheRepository),
-                        new HoneypotListener(honeypotService, guildSettingsService),
-                        new NumberChainListener(guildSettingsService, moderationService, i18nService,
-                                () -> {
-                                    RuntimeConfigSnapshot snapshot = RUNTIME_SNAPSHOT.get();
-                                    return snapshot == null ? 500L : snapshot.getNumberChainReactionDelayMillis();
-                                }),
-                        new WordChainMessageListener(wordChainOps),
-                        new VoiceAutoLeaveListener(guildSettingsService, playerService, i18nService),
-                        new PrivateRoomListener(guildSettingsService, i18nService, privateRoomCacheRepository)
-                );
-        if (messageStatsListener != null) {
-            builder.addEventListeners(messageStatsListener);
+        JDA jda;
+        try {
+            jda = new DiscordLoginRetryExecutor().execute(() -> {
+                AudioModuleConfig audioConfig = new AudioModuleConfig()
+                        .withDaveSessionFactory(new LDJDADaveSessionFactory(new NativeDaveFactory()));
+                JDABuilder builder = JDABuilder.createDefault(
+                                token,
+                                GatewayIntent.GUILD_MESSAGES,
+                                GatewayIntent.DIRECT_MESSAGES,
+                                GatewayIntent.MESSAGE_CONTENT,
+                                GatewayIntent.GUILD_MEMBERS,
+                                GatewayIntent.GUILD_VOICE_STATES,
+                                GatewayIntent.GUILD_MODERATION
+                        )
+                        .setAudioModuleConfig(audioConfig)
+                        .setMemberCachePolicy(MemberCachePolicy.VOICE.or(MemberCachePolicy.OWNER))
+                        .setChunkingFilter(ChunkingFilter.NONE)
+                        .disableCache(
+                                CacheFlag.EMOJI,
+                                CacheFlag.STICKER,
+                                CacheFlag.SCHEDULED_EVENTS,
+                                CacheFlag.SOUNDBOARD_SOUNDS
+                        )
+                        .setStatus(parseOnlineStatus(config.getBotProfile().getPresenceStatus()))
+                        .setActivity(null)
+                        .addEventListeners(
+                                musicCommandListener,
+                                new NotificationListener(guildSettingsService, i18nService),
+                                new MessageLogListener(guildSettingsService, i18nService, messageLogCacheRepository),
+                                new ServerLogListener(guildSettingsService, i18nService, moderationService),
+                                new DuplicateMessageListener(guildSettingsService, moderationService, i18nService, duplicateMessageCacheRepository),
+                                new HoneypotListener(honeypotService, guildSettingsService),
+                                new NumberChainListener(guildSettingsService, moderationService, i18nService,
+                                        () -> {
+                                            RuntimeConfigSnapshot snapshot = RUNTIME_SNAPSHOT.get();
+                                            return snapshot == null ? 500L : snapshot.getNumberChainReactionDelayMillis();
+                                        }),
+                                new WordChainMessageListener(wordChainOps),
+                                new VoiceAutoLeaveListener(guildSettingsService, playerService, i18nService),
+                                new PrivateRoomListener(guildSettingsService, i18nService, privateRoomCacheRepository)
+                        );
+                if (messageStatsListener != null) {
+                    builder.addEventListeners(messageStatsListener);
+                }
+                return builder.build();
+            }, config.getDiscord().getLoginRetry());
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            LOGGER.warn("[NoRule] Discord login retry interrupted; startup aborted.");
+            return;
         }
-
-        JDA jda = builder.build();
         shortUrlService.updateAccessPublisher(new DiscordShortUrlAccessPublisher(jda));
         installConsoleShutdownListener(new ConsoleRuntimeContext(
                 jda,
@@ -942,6 +960,34 @@ public final class RuntimeBootstrap {
         int poolSize = parseIntEnv(ENV_MYSQL_POOL_SIZE, mysql.getPoolSize());
         logInfo("[NoRule] Private room cache storage: mysql");
         return new MySqlPrivateRoomCacheRepository(jdbcUrl, username, password, poolSize);
+    }
+
+    private static DictionaryApiGateway createDictionaryApiGateway(BotConfig.Dictionary config) {
+        BotConfig.Dictionary safeConfig = config == null ? BotConfig.Dictionary.defaultValues() : config;
+        Duration requestTimeout = Duration.ofSeconds(safeConfig.getRequestTimeoutSeconds());
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(safeConfig.getConnectTimeoutSeconds()))
+                .build();
+
+        DictionaryApiGateway primary = new FreeDictionaryApiGateway(
+                httpClient,
+                safeConfig.getFreeDictionary(),
+                requestTimeout
+        );
+        DictionaryApiGateway fallback = new MerriamWebsterDictionaryApiGateway(
+                httpClient,
+                safeConfig.getMerriamWebster(),
+                requestTimeout
+        );
+
+        BotConfig.Dictionary.MerriamWebster merriamWebster = safeConfig.getMerriamWebster();
+        if (merriamWebster.isEnabled()
+                && merriamWebster.getApiKey().isBlank()
+                && MISSING_MERRIAM_WEBSTER_KEY_WARNING_LOGGED.compareAndSet(false, true)) {
+            LOGGER.warn("[NoRule] Merriam-Webster dictionary fallback disabled: API key is missing.");
+        }
+
+        return new FallbackDictionaryApiGateway(primary, fallback, merriamWebster.isAvailable());
     }
 
     private static void closeQuietly(AutoCloseable closeable, String name) {

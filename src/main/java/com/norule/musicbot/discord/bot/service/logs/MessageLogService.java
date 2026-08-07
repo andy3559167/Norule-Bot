@@ -3,6 +3,7 @@ package com.norule.musicbot.discord.bot.service.logs;
 import com.norule.musicbot.discord.bot.service.cache.*;
 
 import com.norule.musicbot.config.GuildSettingsService;
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.i18n.I18nService;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.entities.Guild;
@@ -20,7 +21,7 @@ import java.util.List;
 
 public class MessageLogService {
     private static final long CACHE_RETENTION_MILLIS = Duration.ofDays(7).toMillis();
-    private static final int EMBED_FIELD_LIMIT = 1024;
+    private static final int EMBED_FIELD_LIMIT = DiscordEmbedSanitizer.FIELD_VALUE_MAX_LENGTH;
     private static final String EMPTY_TEXT = "(empty)";
 
     private final GuildSettingsService settingsService;
@@ -270,7 +271,7 @@ public class MessageLogService {
         String suffix = "\n```";
         int maxRawLength = EMBED_FIELD_LIMIT - prefix.length() - suffix.length();
         if (safe.length() > maxRawLength) {
-            safe = safe.substring(0, Math.max(0, maxRawLength - 3)) + "...";
+            safe = DiscordEmbedSanitizer.truncate(safe, maxRawLength);
         }
         return prefix + safe + suffix;
     }
@@ -340,7 +341,7 @@ public class MessageLogService {
             return EMPTY_TEXT;
         }
         if (text.length() > EMBED_FIELD_LIMIT) {
-            return text.substring(0, EMBED_FIELD_LIMIT - 3) + "...";
+            return DiscordEmbedSanitizer.truncate(text, EMBED_FIELD_LIMIT);
         }
         return text;
     }

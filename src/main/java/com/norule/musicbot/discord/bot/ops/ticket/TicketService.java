@@ -2,6 +2,7 @@ package com.norule.musicbot.discord.bot.ops.ticket;
 
 import com.norule.musicbot.config.domain.GuildDomainConfigAdapter;
 import com.norule.musicbot.config.domain.TicketConfig;
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.i18n.*;
 
 import net.dv8tion.jda.api.EmbedBuilder;
@@ -973,12 +974,16 @@ public class TicketService {
             List<TicketConfig.TicketOption> options = resolveTicketOptions(cfg, lang);
             EmbedBuilder panel = new EmbedBuilder()
                     .setColor(new Color(cfg.getPanelColor()))
-                    .setTitle(resolvePublicPanelTitle(cfg, lang))
-                    .setDescription(resolvePublicPanelDescription(cfg, lang))
+                    .setTitle(DiscordEmbedSanitizer.sanitizeTitle(resolvePublicPanelTitle(cfg, lang)))
+                    .setDescription(DiscordEmbedSanitizer.sanitizeDescription(resolvePublicPanelDescription(cfg, lang)))
                     .setTimestamp(Instant.now());
             if (options.size() > 1) {
                 for (TicketConfig.TicketOption option : options) {
-                    panel.addField(option.getLabel(), resolvePanelDescription(cfg, option, lang), false);
+                    panel.addField(
+                            DiscordEmbedSanitizer.sanitizeFieldName(option.getLabel()),
+                            DiscordEmbedSanitizer.sanitizeFieldValue(resolvePanelDescription(cfg, option, lang)),
+                            false
+                    );
                 }
             }
             target.sendMessageEmbeds(panel.build())
@@ -1079,8 +1084,8 @@ public class TicketService {
     private EmbedBuilder actionResultEmbed(String lang, String message, Color color) {
         return new EmbedBuilder()
                 .setColor(color)
-                .setTitle(i18n.t(lang, "ticket.action_menu_title"))
-                .setDescription(message);
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(i18n.t(lang, "ticket.action_menu_title")))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(message));
     }
 
     private String ticketActionLabel(String lang, String action) {
@@ -1344,12 +1349,20 @@ public class TicketService {
         String welcome = applyWelcomeTemplate(resolveWelcomeMessage(cfg, option, lang), member.getAsMention(), finalType, summary, lang);
         EmbedBuilder welcomeEmbed = new EmbedBuilder()
                 .setColor(new Color(88, 101, 242))
-                .setTitle(resolvePanelTitle(cfg, option, lang))
-                .setDescription(welcome)
-                .addField(i18n.t(lang, "ticket.field_type"), finalType, true)
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(resolvePanelTitle(cfg, option, lang)))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(welcome))
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName(i18n.t(lang, "ticket.field_type")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(finalType),
+                        true
+                )
                 .setTimestamp(Instant.now());
         if (summary != null && !summary.isBlank()) {
-            welcomeEmbed.addField(i18n.t(lang, "ticket.field_summary"), summary, false);
+            welcomeEmbed.addField(
+                    DiscordEmbedSanitizer.sanitizeFieldName(i18n.t(lang, "ticket.field_summary")),
+                    DiscordEmbedSanitizer.sanitizeFieldValue(summary),
+                    false
+            );
         }
         channel.sendMessage(member.getAsMention())
                 .setEmbeds(welcomeEmbed.build())
@@ -1410,9 +1423,17 @@ public class TicketService {
 
         EmbedBuilder closedEmbed = new EmbedBuilder()
                 .setColor(new Color(231, 76, 60))
-                .setTitle(i18n.t(lang, "ticket.closed_title"))
-                .setDescription(i18n.t(lang, autoClosed ? "ticket.closed_desc_auto" : "ticket.closed_desc_manual", Map.of("user", closedBy)))
-                .addField(i18n.t(lang, "ticket.field_reason"), finalReason, false)
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(i18n.t(lang, "ticket.closed_title")))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(i18n.t(
+                        lang,
+                        autoClosed ? "ticket.closed_desc_auto" : "ticket.closed_desc_manual",
+                        Map.of("user", closedBy)
+                )))
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName(i18n.t(lang, "ticket.field_reason")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(finalReason),
+                        false
+                )
                 .setTimestamp(Instant.now());
 
         if (transcriptFile != null && Files.exists(transcriptFile)) {

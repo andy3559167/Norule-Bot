@@ -271,6 +271,9 @@ public final class ConfigInitializer {
             String trimmed = line.trim();
             if (trimmed.startsWith("token:")) {
                 out.add("# Discord Bot Token (or set DISCORD_TOKEN env var)");
+            } else if ("discord:".equals(trimmed)) {
+                out.add("");
+                out.add("# Discord API login resilience");
             } else if (trimmed.startsWith("prefix:")) {
                 out.add("");
                 out.add("# Command prefix");
@@ -312,6 +315,11 @@ public final class ConfigInitializer {
                 out.add("  # Spotify source options");
             } else if ("audio:".equals(trimmed) && line.startsWith("  ")) {
                 out.add("  # Direct HTTP safety and playback recovery options");
+            } else if ("dictionary:".equals(trimmed)) {
+                out.add("");
+                out.add("# English word-chain dictionary providers");
+            } else if (trimmed.startsWith("apiKey:") && line.startsWith("    ")) {
+                out.add("    # MERRIAM_WEBSTER_API_KEY takes precedence over this value.");
             } else if ("web:".equals(trimmed)) {
                 out.add("");
                 out.add("# Web control panel");

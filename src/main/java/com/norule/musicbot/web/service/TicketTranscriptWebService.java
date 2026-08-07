@@ -2,6 +2,7 @@ package com.norule.musicbot.web.service;
 
 import com.norule.musicbot.TicketService;
 import com.norule.musicbot.config.domain.TicketConfig;
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.web.infra.WebControlServer;
 
 import com.sun.net.httpserver.HttpExchange;
@@ -50,12 +51,16 @@ public final class TicketTranscriptWebService {
         List<TicketConfig.TicketOption> options = resolveTicketOptions(ticket, lang);
         EmbedBuilder panel = new EmbedBuilder()
                 .setColor(new java.awt.Color(ticket.getPanelColor()))
-                .setTitle(resolvePublicPanelTitle(ticket, lang))
-                .setDescription(resolvePublicPanelDescription(ticket, lang))
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(resolvePublicPanelTitle(ticket, lang)))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(resolvePublicPanelDescription(ticket, lang)))
                 .setTimestamp(Instant.now());
         if (options.size() > 1) {
             for (TicketConfig.TicketOption option : options) {
-                panel.addField(option.getLabel(), resolvePanelDescription(ticket, option, lang), false);
+                panel.addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName(option.getLabel()),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(resolvePanelDescription(ticket, option, lang)),
+                        false
+                );
             }
         }
 

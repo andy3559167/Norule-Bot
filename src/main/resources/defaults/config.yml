@@ -1,6 +1,14 @@
 # Discord Bot Token (or set DISCORD_TOKEN env var)
 token: ""
 
+# Discord API login resilience
+discord:
+  loginRetry:
+    enabled: true
+    maxAttempts: 8
+    initialDelaySeconds: 5
+    maxDelaySeconds: 60
+
 # Command prefix
 prefix: "!"
 
@@ -95,6 +103,19 @@ music:
       max-stuck-retries: 2
       resume-rewind-ms: 2000
       stuck-threshold-ms: 20000
+
+# English word-chain dictionary providers
+dictionary:
+  connectTimeoutSeconds: 5
+  requestTimeoutSeconds: 5
+  freeDictionary:
+    enabled: true
+    endpoint: "https://api.dictionaryapi.dev/api/v2/entries/en/"
+  merriamWebster:
+    enabled: true
+    endpoint: "https://www.dictionaryapi.com/api/v3/references/collegiate/json/"
+    # MERRIAM_WEBSTER_API_KEY takes precedence over this value.
+    apiKey: ""
 
 # Web control panel
 web:

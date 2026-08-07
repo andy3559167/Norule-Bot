@@ -55,6 +55,7 @@ class ConfigInitializerTest {
         Map<String, Object> root = readMap(configPath);
         assertEquals(List.of(
                 "token",
+                "discord",
                 "prefix",
                 "debug",
                 "runtime-dependencies",
@@ -66,6 +67,7 @@ class ConfigInitializerTest {
                 "bot",
                 "developers",
                 "music",
+                "dictionary",
                 "web",
                 "database",
                 "shortUrl",

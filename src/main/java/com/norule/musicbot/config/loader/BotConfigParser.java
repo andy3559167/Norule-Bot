@@ -9,8 +9,21 @@ import java.util.LinkedHashMap;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.function.Function;
 
 final class BotConfigParser {
+    private static final String ENV_MERRIAM_WEBSTER_API_KEY = "MERRIAM_WEBSTER_API_KEY";
+
+    private final Function<String, String> environment;
+
+    BotConfigParser() {
+        this(System::getenv);
+    }
+
+    BotConfigParser(Function<String, String> environment) {
+        this.environment = environment == null ? ignored -> null : environment;
+    }
+
     BotConfig parse(Path path) {
         if (!Files.exists(path)) {
             throw new IllegalStateException("config.yml not found: " + path.toAbsolutePath());
@@ -22,12 +35,13 @@ final class BotConfigParser {
             Map<String, Object> root = asMap(rootObject);
 
             String tokenFromConfig = getString(root, "token", "");
-            String tokenFromEnv = System.getenv("DISCORD_TOKEN");
+            String tokenFromEnv = environment.apply("DISCORD_TOKEN");
             String token = !tokenFromConfig.isBlank() ? tokenFromConfig : nullToEmpty(tokenFromEnv);
             if (token.isBlank()) {
                 throw new IllegalStateException("依賴檢查完成，請到 config.yml 輸入 token，或設定 DISCORD_TOKEN。");
             }
 
+            BotConfig.Discord discord = BotConfig.Discord.fromMap(asMap(root.get("discord")), null);
             String prefix = getString(root, "prefix", "!");
             boolean debug = getBoolean(root, "debug", false);
             Long commandGuildId = toLong(root.get("commandGuildId"));
@@ -50,11 +64,19 @@ final class BotConfigParser {
             Map<String, Object> statsMap = applySharedDatabase(asMap(root.get("stats")), sharedDatabase);
             BotConfig.ShortUrl shortUrl = BotConfig.ShortUrl.fromMap(shortUrlMap, null);
             BotConfig.MinecraftStatus minecraftStatus = BotConfig.MinecraftStatus.fromMap(asMap(root.get("minecraftStatus")), null);
+            BotConfig.Dictionary dictionary = BotConfig.Dictionary.fromMap(
+                    withMerriamWebsterEnvironmentKey(
+                            asMap(root.get("dictionary")),
+                            environment.apply(ENV_MERRIAM_WEBSTER_API_KEY)
+                    ),
+                    null
+            );
             BotConfig.Web web = BotConfig.Web.fromMap(asMap(root.get("web")), null);
             BotConfig.Stats stats = BotConfig.Stats.fromMap(statsMap, null);
 
             return new BotConfig(
                     token,
+                    discord,
                     prefix,
                     debug,
                     commandGuildId,
@@ -74,6 +96,7 @@ final class BotConfigParser {
                     ticket,
                     shortUrl,
                     minecraftStatus,
+                    dictionary,
                     web,
                     stats
             );
@@ -144,6 +167,22 @@ final class BotConfigParser {
 
     private static String nullToEmpty(String text) {
         return text == null ? "" : text.trim();
+    }
+
+    private static Map<String, Object> withMerriamWebsterEnvironmentKey(
+            Map<String, Object> dictionary,
+            String environmentApiKey
+    ) {
+        if (environmentApiKey == null || environmentApiKey.isBlank()) {
+            return dictionary;
+        }
+        Map<String, Object> resolvedDictionary = new LinkedHashMap<>(dictionary);
+        Map<String, Object> merriamWebster = new LinkedHashMap<>(
+                asMap(resolvedDictionary.get("merriamWebster"))
+        );
+        merriamWebster.put("apiKey", environmentApiKey.trim());
+        resolvedDictionary.put("merriamWebster", merriamWebster);
+        return resolvedDictionary;
     }
 
     @SuppressWarnings("unchecked")

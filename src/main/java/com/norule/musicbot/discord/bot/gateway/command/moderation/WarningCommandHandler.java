@@ -1,5 +1,6 @@
 package com.norule.musicbot.discord.bot.gateway.command.moderation;
 
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.discord.bot.app.MusicCommandService;
 import com.norule.musicbot.discord.bot.gateway.command.CommandOptions;
 import com.norule.musicbot.discord.bot.gateway.component.ComponentIds;
@@ -161,7 +162,7 @@ public final class WarningCommandHandler {
     private EmbedBuilder warningsResultEmbed(String content) {
         return new EmbedBuilder()
                 .setColor(new Color(241, 196, 15))
-                .setDescription(content);
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(content));
     }
 
     private static final class WarningActionRequest {

@@ -3,6 +3,7 @@ package com.norule.musicbot.discord.bot.gateway.command.welcome;
 
 import com.norule.musicbot.config.GuildSettingsService;
 import com.norule.musicbot.discord.bot.gateway.command.settings.view.BoolTextHelper;
+import com.norule.musicbot.domain.discord.DiscordEmbedSanitizer;
 import com.norule.musicbot.i18n.I18nService;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.Permission;
@@ -139,9 +140,13 @@ public final class WelcomeCommandHandler {
         String previewBody = textPreviewer.previewText(message, event.getGuild(), event.getUser());
         EmbedBuilder preview = new EmbedBuilder()
                 .setColor(new Color(0x2ECC71))
-                .setTitle(previewTitle)
-                .setDescription(previewBody)
-                .addField(i18n.get().t(lang, "welcome.saved_title"), i18n.get().t(lang, "welcome.saved_desc"), false)
+                .setTitle(DiscordEmbedSanitizer.sanitizeTitle(previewTitle))
+                .setDescription(DiscordEmbedSanitizer.sanitizeDescription(previewBody))
+                .addField(
+                        DiscordEmbedSanitizer.sanitizeFieldName(i18n.get().t(lang, "welcome.saved_title")),
+                        DiscordEmbedSanitizer.sanitizeFieldValue(i18n.get().t(lang, "welcome.saved_desc")),
+                        false
+                )
                 .setThumbnail(event.getUser().getEffectiveAvatarUrl());
         event.replyEmbeds(preview.build()).setEphemeral(true).queue();
     }
@@ -197,7 +202,7 @@ public final class WelcomeCommandHandler {
         if (s == null || s.isBlank()) {
             return "-";
         }
-        return s.length() <= max ? s : s.substring(0, max - 1);
+        return DiscordEmbedSanitizer.truncate(s, max);
     }
 }
 
