@@ -69,23 +69,7 @@ public final class WebStaticAssetController {
     }
 
     private String buildRootHtml() {
-        String botName = (owner.jda() != null && owner.jda().getSelfUser() != null) ? owner.jda().getSelfUser().getName() : "NoRule Bot";
-        String botAvatarUrl = resolveBotAvatarUrl();
-        String faviconUrl = botAvatarUrl.isBlank()
-                ? "https://cdn.discordapp.com/embed/avatars/0.png"
-                : botAvatarUrl;
-        String botAvatarBlock = botAvatarUrl.isBlank()
-                ? "<div class=\"bot-avatar-fallback\" aria-label=\"" + escapeHtmlAttr(botName) + "\">NR</div>"
-                : "<img class=\"bot-avatar\" src=\"" + escapeHtmlAttr(botAvatarUrl) + "\" alt=\"" + escapeHtmlAttr(botName) + "\" loading=\"lazy\" referrerpolicy=\"no-referrer\" />";
-
-        return renderTemplate("web/index.html", Map.of(
-                "__FAVICON_URL__", escapeHtmlAttr(faviconUrl),
-                "__WEB_APP_CSS_URL__", "/web/app.css?v=" + owner.webAssetVersion(),
-                "__WEB_APP_JS_URL__", "/web/app.js?v=" + owner.webAssetVersion(),
-                "__HERO_SECTION__", buildHeroSection(botAvatarBlock),
-                "__SIDEBAR_SECTION__", buildSidebarSection(),
-                "__SETTINGS_SECTION__", buildSettingsSection()
-        ));
+        return loadWebTemplate("web/dashboard.html");
     }
 
     private String buildHeroSection(String botAvatarBlock) {

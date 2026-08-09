@@ -48,5 +48,9 @@ AGENTS.md
 /web/.vite/
 /web/.nuxt/
 /web/.output/
+/web/.output-dashboard/
 /web/dist/
+/web/dashboard/.nuxt/
+/web/dashboard/dist/
+/web/dashboard/node_modules/
 .claude/settings.local.json

@@ -1,0 +1,41 @@
+<script setup lang="ts">
+import { useDashboard } from '../composables/useDashboard'
+
+const dashboard = useDashboard()
+
+async function onGuildChange(event: Event) {
+  const select = event.target as HTMLSelectElement
+  const previous = dashboard.state.selectedGuildId
+  await dashboard.selectGuild(select.value)
+  select.value = dashboard.state.selectedGuildId || previous
+}
+</script>
+
+<template>
+  <header class="nr-topbar">
+    <button type="button" class="nr-mobile-menu" aria-label="開啟功能選單" @click="dashboard.state.sidebarOpen = true">☰</button>
+    <label class="nr-server-select">
+      <span class="nr-server-icon">{{ dashboard.currentGuild.value?.name?.slice(0, 2).toUpperCase() || 'NR' }}</span>
+      <span><small>目前管理的伺服器</small>
+        <select :value="dashboard.state.selectedGuildId" @change="onGuildChange">
+          <option v-for="guild in dashboard.manageableGuilds.value" :key="guild.id" :value="guild.id">{{ guild.name }}</option>
+        </select>
+      </span>
+      <i>⌄</i>
+    </label>
+
+    <div class="nr-topbar-actions">
+      <div class="nr-language-switch" aria-label="介面語言">
+        <button
+          v-for="language in dashboard.i18n.state.uiLanguages"
+          :key="language.code"
+          type="button"
+          :class="{ active: dashboard.i18n.state.language === language.code }"
+          @click="dashboard.i18n.setLanguage(language.code)"
+        >{{ language.code === 'zh-TW' ? '繁' : language.code === 'zh-CN' ? '简' : 'EN' }}</button>
+      </div>
+      <button type="button" class="nr-icon-button nr-directory-button" aria-label="伺服器清單" @click="dashboard.state.guildDirectoryOpen = true">◇</button>
+      <a class="nr-discord-button" href="https://discord.com/app" target="_blank" rel="noopener">開啟 Discord ↗</a>
+    </div>
+  </header>
+</template>

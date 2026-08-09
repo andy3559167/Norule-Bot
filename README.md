@@ -2,7 +2,7 @@
 
 NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人，整合音樂播放、歌單管理、伺服器設定、管理工具、客服單、私人包廂、日誌、Web UI、短網址服務與 Minecraft 伺服器狀態查詢。
 
-本專案採用單一 Java 後端為核心。NoRule URL 首頁使用 Nuxt 4、Vue 與 TypeScript，既有 Dashboard 暫由 Vite 建置；正式部署仍由 Java Web Server 提供 API、OAuth、Session 與靜態資源，不需要 Node runtime。
+本專案採用單一 Java 後端為核心。NoRule URL 首頁與 Dashboard 都使用 Nuxt 4、Vue 3 與 TypeScript；正式部署仍由 Java Web Server 提供 API、OAuth、Session 與靜態資源，不需要 Node runtime。
 
 ## 目前版本
 
@@ -10,7 +10,7 @@ NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人�
 - Java：`21 LTS`
 - Discord 函式庫：`JDA 6.3.1`
 - 音樂核心：`Lavaplayer 2.2.6`、`youtube-source 1.18.1`、`lavasrc 4.8.1`
-- Web 前端：`Nuxt 4 + Vue + TypeScript`（NoRule URL）、`Vite`（Dashboard 過渡期）
+- Web 前端：`Nuxt 4 + Vue 3 + TypeScript`（NoRule URL 與 Dashboard）
 - 資料儲存：檔案、SQLite、MySQL / HikariCP，依模組設定使用
 - 授權：GPL-3.0
 
@@ -63,7 +63,7 @@ NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人�
 - 可管理伺服器設定、語言、歡迎訊息、音樂、日誌、客服單等模組。
 - 支援 HTTP 或 HTTPS。
 - Java 後端負責 `/api/**`、Session、OAuth Callback 與靜態資源。
-- `web/` 是共用前端 workspace；NoRule URL 使用 Nuxt SPA/static build，Dashboard 暫由獨立 Vite 設定建置。
+- `web/` 是共用前端 workspace；NoRule URL 與 Dashboard 都使用獨立的 Nuxt SPA/static build 設定。
 
 ### 短網址服務
 
@@ -200,10 +200,11 @@ src/main/java/com/norule/musicbot
 
 web/
 ├─ app/                   # Nuxt 4 / Vue / TypeScript 與共用設計系統
-├─ scripts/               # Nuxt static output 安全同步
-├─ src/                   # Dashboard Vanilla 原始碼與 Java 特殊頁模板
+├─ dashboard/             # Dashboard Nuxt root 與設定
+├─ scripts/               # 兩個 Nuxt static output 安全同步
+├─ src/dashboard/         # Dashboard Vue 元件、composables、型別與樣式
+├─ src/templates/         # Java 特殊頁模板
 ├─ nuxt.config.ts
-├─ vite.dashboard.config.ts
 └─ package.json
 ```
 
@@ -245,7 +246,7 @@ NoRule Bot 採用分層式 Discord gateway 架構，各層職責明確分離：
 mvn clean package
 ```
 
-普通 `mvn package` 會在 `prepare-package` 自動執行 `npm ci`、Dashboard Vite build、`nuxt generate` 與 static output 同步。若只需要快速檢查 Java 編譯，可使用 `mvn -q -DskipTests compile`，不會重建前端。
+普通 `mvn package` 會在 `prepare-package` 自動執行 `npm ci`、兩個 Nuxt 應用的 `nuxt generate` 與 static output 同步。若只需要快速檢查 Java 編譯，可使用 `mvn -q -DskipTests compile`，不會重建前端。
 
 建置完成後會產生：
 
@@ -487,7 +488,7 @@ NoRule URL Nuxt dev server：
 npm run dev
 ```
 
-Dashboard Vite dev server：
+Dashboard Nuxt dev server：
 
 ```bash
 npm run dev:dashboard
@@ -503,11 +504,9 @@ npm run dev:dashboard
 Production build 流程：
 
 ```text
-Nuxt source → nuxt generate → .output/public
-                              ↓
-Dashboard source → Vite build → target/classes/web
-                              ↓
-                         Maven JAR
+NoRule URL Nuxt source ─┐
+                        ├─→ nuxt generate → target/classes/web → Maven JAR
+Dashboard Nuxt source ──┘
 ```
 
 JAR 只包含最終 HTML、CSS、JavaScript 與 hashed assets，不包含 Node modules、Nuxt server、Vue SFC 或 TypeScript 原始碼。完整前端架構請參考 [web/README.md](web/README.md)。

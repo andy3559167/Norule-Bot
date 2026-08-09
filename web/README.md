@@ -1,6 +1,6 @@
 # NoRule Web Workspace
 
-`web/` 是 NoRule 的共用前端 workspace。NoRule URL 首頁使用 Nuxt 4、Vue 與 TypeScript；既有 Dashboard 在完成後續遷移前，暫時由獨立的 Vite 設定建置。
+`web/` 是 NoRule 的共用前端 workspace。NoRule URL 首頁與 Dashboard 都使用 Nuxt 4、Vue 3 與 TypeScript，並各自產生可由 Java classpath 提供的靜態頁面。
 
 正式環境不需要 Node.js 或 Nuxt server。瀏覽器資產會在 Maven package 階段寫入 Java classpath，啟動方式仍是：
 
@@ -23,10 +23,16 @@ web/
 │  ├─ pages/index.vue
 │  ├─ types/
 │  └─ utils/
-├─ scripts/sync-static-output.mjs
-├─ src/                         # 暫留 Dashboard Vanilla 原始碼與 Java 特殊頁模板
+├─ dashboard/                   # Dashboard Nuxt root
+│  └─ nuxt.config.ts
+├─ scripts/                     # 兩個 Nuxt 靜態輸出的同步腳本
+│  ├─ sync-dashboard-output.mjs
+│  └─ sync-static-output.mjs
+├─ src/
+│  ├─ dashboard/               # Nuxt Dashboard：Vue 元件、composables、型別與樣式
+│  └─ templates/               # Java 特殊頁模板
 ├─ nuxt.config.ts
-└─ vite.dashboard.config.ts
+└─ package.json
 ```
 
 Java 仍負責 `/api/**`、OAuth、Session、Redirect、Rate Limit、資料庫、媒體內容與靜態檔案服務。Nuxt 不提供 server API。
@@ -48,7 +54,7 @@ $env:NUXT_DEV_API_TARGET='http://127.0.0.1:60001'
 npm run dev
 ```
 
-Dashboard 的 Vite dev server：
+Dashboard 的 Nuxt dev server：
 
 ```bash
 npm run dev:dashboard
@@ -64,9 +70,10 @@ npm run build
 
 `npm run build` 依序執行：
 
-1. Dashboard Vite build。
-2. `nuxt generate`，產生 `.output/public`。
-3. 同步 Nuxt `index.html` 與 `/web/short-url/_nuxt/` hashed assets。
+1. 產生 Dashboard Nuxt 靜態頁面與 `/web/dashboard/_nuxt/` hashed assets。
+2. 同步 Dashboard 產物與 Java 特殊頁模板。
+3. 產生 NoRule URL Nuxt 靜態頁面。
+4. 同步 NoRule URL `index.html` 與 `/web/short-url/_nuxt/` hashed assets。
 
 未設定 `NORULE_WEB_OUTPUT_DIR` 時，產物同步至 `src/main/resources/web`。Maven 會設定此變數為 `target/classes/web`，因此普通 `mvn package` 不會把 Node modules、`.vue`、`.ts` 或 `.output/server` 放入 JAR。
 

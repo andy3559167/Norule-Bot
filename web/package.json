@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "nuxt dev --host 127.0.0.1",
-    "dev:dashboard": "vite --config vite.dashboard.config.ts --host",
-    "build": "npm run build:dashboard && npm run generate:short-url && npm run sync:short-url",
-    "build:dashboard": "vite build --config vite.dashboard.config.ts",
+    "dev:dashboard": "nuxt dev dashboard --host 127.0.0.1 --port 5173",
+    "build": "npm run generate:dashboard && npm run sync:dashboard && npm run generate:short-url && npm run sync:short-url",
+    "generate:dashboard": "nuxt generate dashboard",
+    "sync:dashboard": "node scripts/sync-dashboard-output.mjs",
     "generate:short-url": "nuxt generate",
     "sync:short-url": "node scripts/sync-static-output.mjs",
-    "typecheck": "nuxt typecheck",
+    "typecheck": "nuxt typecheck && nuxt typecheck dashboard",
     "test": "vitest run",
     "preview": "npx serve .output/public",
     "postinstall": "nuxt prepare"
