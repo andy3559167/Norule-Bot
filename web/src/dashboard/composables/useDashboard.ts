@@ -1,5 +1,6 @@
 import { computed, reactive } from 'vue'
 import type {
+  BotProfile,
   DashboardSettings,
   DashboardTab,
   DiscordOption,
@@ -162,7 +163,9 @@ function createDashboardStore() {
     saving: false,
     sidebarOpen: false,
     guildDirectoryOpen: false,
+    atHome: true,
     currentTab: 'general' as DashboardTab,
+    bot: null as BotProfile | null,
     user: null as UserProfile | null,
     guilds: [] as GuildSummary[],
     selectedGuildId: '',
@@ -296,6 +299,11 @@ function createDashboardStore() {
     await i18n.initializeI18n()
     try {
       try {
+        state.bot = await dashboardApi<BotProfile>('/api/bot')
+      } catch {
+        state.bot = null
+      }
+      try {
         state.user = await dashboardApi<UserProfile>('/api/me')
         state.authenticated = true
       } catch {
@@ -368,6 +376,7 @@ function createDashboardStore() {
 
   async function switchTab(tab: DashboardTab) {
     if (state.loadingSection || state.saving) return
+    state.atHome = false
     state.currentTab = tab
     state.sidebarOpen = false
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}#${tab}`)
@@ -377,6 +386,13 @@ function createDashboardStore() {
     if (tab === 'ticket' && !state.ticketHistoryLoaded) {
       await loadTicketHistory().catch(() => undefined)
     }
+  }
+
+  function openHome() {
+    state.atHome = true
+    state.sidebarOpen = false
+    history.replaceState(null, '', `${window.location.pathname}${window.location.search}#home`)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   async function loadSection(section: DashboardTab, force = false) {
@@ -578,6 +594,7 @@ function createDashboardStore() {
     loadGuildMetadata,
     selectGuild,
     switchTab,
+    openHome,
     loadSection,
     saveSettings,
     resetSection,

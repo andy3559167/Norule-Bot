@@ -119,10 +119,12 @@ function requestTranscriptDelete(file: TicketTranscript) {
       <div v-if="dashboard.state.ticketHistory.length" class="nr-history-list">
         <article v-for="file in dashboard.state.ticketHistory" :key="file.name">
           <span class="nr-history-icon">TXT</span>
-          <div><a :href="file.url" target="_blank" rel="noopener">{{ file.name }}</a><small>頻道：{{ file.channelId ? `<#${file.channelId}>` : '-' }} ・ {{ formatDate(file.lastModifiedAt) }}</small></div>
+          <div class="nr-history-copy"><a :href="file.url" target="_blank" rel="noopener">{{ file.name }}</a><small>頻道：{{ file.channelId ? `<#${file.channelId}>` : '-' }} ・ {{ formatDate(file.lastModifiedAt) }}</small></div>
           <b>{{ formatBytes(file.size) }}</b>
-          <template v-if="dashboard.state.pendingTranscriptDelete === file.name"><button type="button" class="nr-button" @click="dashboard.state.pendingTranscriptDelete = ''">取消</button><button type="button" class="nr-button is-danger" @click="dashboard.deleteTranscript(file)">確認刪除</button></template>
-          <button v-else type="button" class="nr-button is-danger-subtle" @click="requestTranscriptDelete(file)">刪除</button>
+          <div class="nr-history-actions">
+            <template v-if="dashboard.state.pendingTranscriptDelete === file.name"><button type="button" class="nr-button" @click="dashboard.state.pendingTranscriptDelete = ''">取消</button><button type="button" class="nr-button is-danger" @click="dashboard.deleteTranscript(file)">確認刪除</button></template>
+            <button v-else type="button" class="nr-button is-danger-subtle" @click="requestTranscriptDelete(file)">刪除</button>
+          </div>
         </article>
       </div>
       <div v-else class="nr-empty-state"><span>▤</span><strong>{{ dashboard.i18n.t('ticket_history_empty', '目前沒有票券歷史紀錄') }}</strong><p>建立並關閉票券後，對話紀錄會出現在這裡。</p></div>

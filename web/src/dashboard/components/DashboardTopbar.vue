@@ -2,27 +2,12 @@
 import { useDashboard } from '../composables/useDashboard'
 
 const dashboard = useDashboard()
-
-async function onGuildChange(event: Event) {
-  const select = event.target as HTMLSelectElement
-  const previous = dashboard.state.selectedGuildId
-  await dashboard.selectGuild(select.value)
-  select.value = dashboard.state.selectedGuildId || previous
-}
 </script>
 
 <template>
   <header class="nr-topbar">
     <button type="button" class="nr-mobile-menu" aria-label="開啟功能選單" @click="dashboard.state.sidebarOpen = true">☰</button>
-    <label class="nr-server-select">
-      <span class="nr-server-icon">{{ dashboard.currentGuild.value?.name?.slice(0, 2).toUpperCase() || 'NR' }}</span>
-      <span><small>目前管理的伺服器</small>
-        <select :value="dashboard.state.selectedGuildId" @change="onGuildChange">
-          <option v-for="guild in dashboard.manageableGuilds.value" :key="guild.id" :value="guild.id">{{ guild.name }}</option>
-        </select>
-      </span>
-      <i>⌄</i>
-    </label>
+    <DashboardGuildSelect />
 
     <div class="nr-topbar-actions">
       <div class="nr-language-switch" aria-label="介面語言">

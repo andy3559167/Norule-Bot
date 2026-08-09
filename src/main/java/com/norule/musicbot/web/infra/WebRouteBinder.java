@@ -34,6 +34,7 @@ final class WebRouteBinder {
         server.createContext("/auth/login", authController::handleAuthLogin);
         server.createContext("/auth/callback", authController::handleAuthCallback);
         server.createContext("/auth/logout", authController::handleAuthLogout);
+        server.createContext("/api/bot", metadataController::handleApiBot);
         server.createContext("/api/me", authController::handleApiMe);
         server.createContext("/api/guilds", metadataController::handleApiGuilds);
         server.createContext("/api/web/i18n", metadataController::handleApiWebI18n);

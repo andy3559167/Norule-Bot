@@ -5,6 +5,7 @@ import com.norule.musicbot.web.session.WebSessionManager;
 import com.sun.net.httpserver.HttpExchange;
 import net.dv8tion.jda.api.Permission;
 import net.dv8tion.jda.api.entities.Guild;
+import net.dv8tion.jda.api.entities.SelfUser;
 import net.dv8tion.jda.api.utils.data.DataArray;
 import net.dv8tion.jda.api.utils.data.DataObject;
 
@@ -16,6 +17,27 @@ public final class WebMetadataController {
 
     public WebMetadataController(WebControlServer owner) {
         this.owner = owner;
+    }
+
+    public void handleApiBot(HttpExchange exchange) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            owner.sendJson(exchange, 405, DataObject.empty().put("error", "Method Not Allowed"));
+            return;
+        }
+
+        String id = "";
+        String username = "NoRule Bot";
+        String avatarUrl = "";
+        if (owner.jda() != null) {
+            SelfUser bot = owner.jda().getSelfUser();
+            id = bot.getId();
+            username = bot.getName();
+            avatarUrl = bot.getEffectiveAvatarUrl();
+        }
+        owner.sendJson(exchange, 200, DataObject.empty()
+                .put("id", id)
+                .put("username", username)
+                .put("avatarUrl", avatarUrl));
     }
 
     public void handleApiWebI18n(HttpExchange exchange) throws IOException {

@@ -14,6 +14,12 @@ export interface UserProfile {
   avatarUrl: string
 }
 
+export interface BotProfile {
+  id: string
+  username: string
+  avatarUrl: string
+}
+
 export interface GuildSummary {
   id: string
   name: string
