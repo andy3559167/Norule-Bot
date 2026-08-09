@@ -2,7 +2,7 @@
 
 NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人，整合音樂播放、歌單管理、伺服器設定、管理工具、客服單、私人包廂、日誌、Web UI、短網址服務與 Minecraft 伺服器狀態查詢。
 
-本專案採用單一 Java 後端為核心，Web UI 前端可使用 Vite 開發與打包，正式部署時仍可由 Java Web Server 提供 API、OAuth、Session 與靜態資源。
+本專案採用單一 Java 後端為核心。NoRule URL 首頁使用 Nuxt 4、Vue 與 TypeScript，既有 Dashboard 暫由 Vite 建置；正式部署仍由 Java Web Server 提供 API、OAuth、Session 與靜態資源，不需要 Node runtime。
 
 ## 目前版本
 
@@ -10,7 +10,7 @@ NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人�
 - Java：`21 LTS`
 - Discord 函式庫：`JDA 6.3.1`
 - 音樂核心：`Lavaplayer 2.2.6`、`youtube-source 1.18.1`、`lavasrc 4.8.1`
-- Web 前端：`Vite`
+- Web 前端：`Nuxt 4 + Vue + TypeScript`（NoRule URL）、`Vite`（Dashboard 過渡期）
 - 資料儲存：檔案、SQLite、MySQL / HikariCP，依模組設定使用
 - 授權：GPL-3.0
 
@@ -63,13 +63,13 @@ NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人�
 - 可管理伺服器設定、語言、歡迎訊息、音樂、日誌、客服單等模組。
 - 支援 HTTP 或 HTTPS。
 - Java 後端負責 `/api/**`、Session、OAuth Callback 與靜態資源。
-- `web/` 目錄使用 Vite 作為前端開發與打包 workspace。
+- `web/` 是共用前端 workspace；NoRule URL 使用 Nuxt SPA/static build，Dashboard 暫由獨立 Vite 設定建置。
 
 ### 短網址服務
 
 - 可使用獨立短網址網域，例如 `https://s.norule.me`。
 - 首頁 `/` 提供長網址輸入與短網址建立頁面。
-- `POST /api/short-url` 可建立短網址。
+- `POST /api/short` 可建立短網址。
 - `/{code}` 會轉址到原始網址。
 - 支援自訂代碼、隨機代碼、重複網址去重、過期時間與過期清理。
 - 會阻擋無效網址、保留路徑、短網址自我指向與私有 / 本機目標，除非設定允許。
@@ -199,10 +199,12 @@ src/main/java/com/norule/musicbot
 └─ TicketService.java
 
 web/
-├─ src/                   # Web UI 前端原始碼
-├─ public/                # 前端公開資源
-├─ package.json           # Vite 指令與依賴
-└─ vite.config.js
+├─ app/                   # Nuxt 4 / Vue / TypeScript 與共用設計系統
+├─ scripts/               # Nuxt static output 安全同步
+├─ src/                   # Dashboard Vanilla 原始碼與 Java 特殊頁模板
+├─ nuxt.config.ts
+├─ vite.dashboard.config.ts
+└─ package.json
 ```
 
 ## 架構設計
@@ -231,23 +233,19 @@ NoRule Bot 採用分層式 Discord gateway 架構，各層職責明確分離：
 - Java 17 或更新版本。
 - Maven 3.9 或更新版本。
 - Discord Bot Token。
-- 若要編譯 Web UI，需安裝 Node.js 與 npm。
+- 建置 Web UI 需 Node.js 22.19+（或 24.11+）與 npm；正式執行不需要 Node.js。
 - Bot 邀請到伺服器時需勾選 `bot` 與 `applications.commands` scope。
 - 常用權限：查看頻道、發送訊息、嵌入連結、管理訊息、讀取訊息歷史、連接語音、語音發話、管理頻道、踢出成員、管理伺服器。依功能啟用狀態可再縮減。
 
 ### 建置
 
-一般 Java 建置：
+一般 production 建置：
 
 ```bash
-mvn clean package -DskipTests
+mvn clean package
 ```
 
-包含 Web UI 前端建置：
-
-```bash
-mvn clean package -DskipTests -Pweb-build
-```
+普通 `mvn package` 會在 `prepare-package` 自動執行 `npm ci`、Dashboard Vite build、`nuxt generate` 與 static output 同步。若只需要快速檢查 Java 編譯，可使用 `mvn -q -DskipTests compile`，不會重建前端。
 
 建置完成後會產生：
 
@@ -407,7 +405,7 @@ https://s.norule.me/abc1234
 API 範例：
 
 ```bash
-curl -X POST "https://s.norule.me/api/short-url" \
+curl -X POST "https://s.norule.me/api/short" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://example.com","customCode":"example"}'
 ```
@@ -474,7 +472,7 @@ web:
 
 ```bash
 cd web
-npm install
+npm ci
 ```
 
 建置一次：
@@ -483,24 +481,36 @@ npm install
 npm run build
 ```
 
-監看模式：
+NoRule URL Nuxt dev server：
 
 ```bash
 npm run dev
 ```
 
-獨立 Vite dev server：
+Dashboard Vite dev server：
 
 ```bash
-npm run dev:server
+npm run dev:dashboard
 ```
 
 建議本地開發流程：
 
-1. 啟動 Java 後端。
+1. 啟動 Java 短網址後端（預設 `http://127.0.0.1:60001`）。
 2. 在 `web/` 執行 `npm run dev`。
-3. 開啟 Java Web UI 網址，例如 `http://localhost:60000`。
-4. Vite watcher 會自動更新 `src/main/resources/web/app.js` 與 `app.css`。
+3. 開啟 Nuxt 顯示的開發網址；`/api` 會代理至 `NUXT_DEV_API_TARGET`，預設為短網址後端。
+4. 提交前執行 `npm run typecheck`、`npm test` 與 `npm run build`。
+
+Production build 流程：
+
+```text
+Nuxt source → nuxt generate → .output/public
+                              ↓
+Dashboard source → Vite build → target/classes/web
+                              ↓
+                         Maven JAR
+```
+
+JAR 只包含最終 HTML、CSS、JavaScript 與 hashed assets，不包含 Node modules、Nuxt server、Vue SFC 或 TypeScript 原始碼。完整前端架構請參考 [web/README.md](web/README.md)。
 
 ## 更新
 
@@ -510,13 +520,7 @@ mvn clean package -DskipTests
 java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.6.jar
 ```
 
-若有更新 Web UI 前端：
-
-```bash
-git pull
-mvn clean package -DskipTests -Pweb-build
-java -Dfile.encoding=UTF-8 -jar target/discord-music-bot-1.6.jar
-```
+更新 Web UI 時不需要額外 Maven profile；普通 `mvn clean package` 已包含前端 build。
 
 ## 注意事項
 

@@ -177,9 +177,6 @@
         <resources>
             <resource>
                 <directory>src/main/resources</directory>
-                <excludes>
-                    <exclude>web/_legacy/**</exclude>
-                </excludes>
             </resource>
         </resources>
         <plugins>
@@ -247,6 +244,38 @@
                 </configuration>
                 <executions>
                     <execution>
+                        <id>web-npm-ci</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <workingDirectory>${project.basedir}/web</workingDirectory>
+                            <executable>npm</executable>
+                            <arguments>
+                                <argument>ci</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>web-static-build</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <workingDirectory>${project.basedir}/web</workingDirectory>
+                            <executable>npm</executable>
+                            <arguments>
+                                <argument>run</argument>
+                                <argument>build</argument>
+                            </arguments>
+                            <environmentVariables>
+                                <NORULE_WEB_OUTPUT_DIR>${project.build.outputDirectory}/web</NORULE_WEB_OUTPUT_DIR>
+                            </environmentVariables>
+                        </configuration>
+                    </execution>
+                    <execution>
                         <id>write-runtime-dependency-manifest</id>
                         <phase>prepare-package</phase>
                         <goals>
@@ -272,55 +301,5 @@
         </plugins>
     </build>
 
-    <profiles>
-        <profile>
-            <id>web-build</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.codehaus.mojo</groupId>
-                        <artifactId>exec-maven-plugin</artifactId>
-                        <version>3.6.3</version>
-                        <executions>
-                            <execution>
-                                <id>web-npm-install</id>
-                                <phase>generate-resources</phase>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                                <configuration>
-                                    <workingDirectory>${project.basedir}/web</workingDirectory>
-                                    <executable>npm</executable>
-                                    <arguments>
-                                        <argument>install</argument>
-                                    </arguments>
-                                </configuration>
-                            </execution>
-                            <execution>
-                                <id>web-npm-build</id>
-                                <phase>generate-resources</phase>
-                                <goals>
-                                    <goal>exec</goal>
-                                </goals>
-                                <configuration>
-                                    <workingDirectory>${project.basedir}/web</workingDirectory>
-                                    <executable>npm</executable>
-                                    <arguments>
-                                        <argument>run</argument>
-                                        <argument>build</argument>
-                                    </arguments>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.6.0-M1</version>
-            </plugin>
-        </plugins>
-            </build>
-        </profile>
-    </profiles>
 </project>
 

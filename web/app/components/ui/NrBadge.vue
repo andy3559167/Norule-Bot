@@ -1,0 +1,3 @@
+<script setup lang="ts">withDefaults(defineProps<{ tone?: 'accent' | 'neutral' | 'success' }>(), { tone: 'neutral' })</script>
+<template><span class="nr-badge" :class="`nr-badge--${tone}`"><slot /></span></template>
+<style scoped>.nr-badge{display:inline-flex;align-items:center;gap:.4rem;width:max-content;padding:.35rem .65rem;border:1px solid var(--nr-border);border-radius:999px;font-size:.74rem;font-weight:720;line-height:1}.nr-badge--neutral{color:var(--nr-text-muted);background:var(--nr-surface-soft)}.nr-badge--accent,.nr-badge--success{color:var(--nr-accent);border-color:rgba(112,230,171,.24);background:rgba(112,230,171,.07)}</style>

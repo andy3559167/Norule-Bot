@@ -1,0 +1,4 @@
+<script setup lang="ts">withDefaults(defineProps<{ brand?: string; description?: string }>(), { brand: 'NoRule', description: '' })</script>
+<template><footer><NrPageContainer><div><a href="#top">{{ brand }}</a><p v-if="description">{{ description }}</p></div><slot><a href="#shorten">回到縮短網址</a></slot></NrPageContainer></footer></template>
+<style scoped>footer{padding:2.2rem 0 3rem;border-top:1px solid var(--nr-border)}footer :deep(.nr-container){display:flex;align-items:flex-start;justify-content:space-between;gap:2rem}a{color:var(--nr-text);font-weight:720;text-decoration:none}p{max-width:30rem;margin:.35rem 0 0;color:var(--nr-text-muted);font-size:.82rem}footer> :deep(.nr-container)>a{color:var(--nr-text-muted);font-size:.84rem;font-weight:560}@media(max-width:640px){footer :deep(.nr-container){display:grid}}
+</style>

@@ -46,4 +46,7 @@ AGENTS.md
 # Frontend toolchain
 /web/node_modules/
 /web/.vite/
+/web/.nuxt/
+/web/.output/
+/web/dist/
 .claude/settings.local.json
