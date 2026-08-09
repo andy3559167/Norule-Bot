@@ -4,6 +4,9 @@ import com.norule.musicbot.domain.shorturl.ShortUrlDomainService;
 import com.norule.musicbot.domain.shorturl.ImageShare;
 import com.norule.musicbot.domain.shorturl.ShortUrlAccessEvent;
 import com.norule.musicbot.service.shorturl.ImageShareService;
+import com.norule.musicbot.service.shorturl.AnonymousDeviceIdentityService;
+import com.norule.musicbot.service.shorturl.MediaPasswordAttemptGuard;
+import com.norule.musicbot.domain.shorturl.QuotaSubject;
 import com.norule.musicbot.shorturl.ShortUrlAccessPublisher;
 import com.norule.musicbot.shorturl.ShortUrlRepository;
 
@@ -55,6 +58,7 @@ public final class ShortUrlService {
     private final ShortUrlDomainService domainService = new ShortUrlDomainService();
     private final ShortUrlRepository repository;
     private final ImageShareService imageShareService;
+    private final AnonymousDeviceIdentityService anonymousDeviceIdentityService;
     private final AtomicReference<Options> options = new AtomicReference<>();
     private final AtomicReference<ShortUrlAccessPublisher> accessPublisher =
             new AtomicReference<>(ShortUrlAccessPublisher.NO_OP);
@@ -77,11 +81,17 @@ public final class ShortUrlService {
     }
 
     public ShortUrlService(ShortUrlRepository repository, Options options, ImageShareService imageShareService) {
+        this(repository, options, imageShareService, null);
+    }
+
+    public ShortUrlService(ShortUrlRepository repository, Options options, ImageShareService imageShareService,
+                           AnonymousDeviceIdentityService anonymousDeviceIdentityService) {
         if (repository == null) {
             throw new IllegalArgumentException("repository cannot be null");
         }
         this.repository = repository;
         this.imageShareService = imageShareService;
+        this.anonymousDeviceIdentityService = anonymousDeviceIdentityService;
         this.logChannelId = normalizeChannelId(repository.findLogChannelId());
         this.options.set(options == null
                 ? new Options(
@@ -224,10 +234,17 @@ public final class ShortUrlService {
     public ImageShareService.UploadResult createImageShare(ImageShareService.Upload upload,
                                                             String clientAddress,
                                                             String userAgent) {
+        return createImageShare(upload, clientAddress, userAgent, null);
+    }
+
+    public ImageShareService.UploadResult createImageShare(ImageShareService.Upload upload,
+                                                            String clientAddress,
+                                                            String userAgent,
+                                                            QuotaSubject quotaSubject) {
         if (imageShareService == null) {
             return new ImageShareService.UploadResult(null, ImageShareService.UploadError.DISABLED);
         }
-        ImageShareService.UploadResult result = imageShareService.create(upload);
+        ImageShareService.UploadResult result = imageShareService.create(upload, quotaSubject);
         if (result.isSuccess()) {
             ImageShare imageShare = result.imageShare();
             publishAccess(ShortUrlAccessEvent.Action.CREATED, mediaResourceType(imageShare),
@@ -251,6 +268,37 @@ public final class ShortUrlService {
 
     public boolean verifyImageSharePassword(ImageShare imageShare, String password) {
         return imageShareService != null && imageShareService.verifyPassword(imageShare, password);
+    }
+
+    public MediaPasswordAttemptGuard.Result verifyImageSharePasswordGuarded(ImageShare imageShare,
+                                                                             String password,
+                                                                             String clientAddress) {
+        if (imageShareService == null) {
+            return new MediaPasswordAttemptGuard.Result(
+                    MediaPasswordAttemptGuard.Status.INVALID_PASSWORD, 0L);
+        }
+        return imageShareService.verifyPasswordGuarded(imageShare, password, clientAddress);
+    }
+
+    public AnonymousDeviceIdentityService.DeviceIdentity resolveAnonymousDevice(String deviceToken,
+                                                                                 String clientAddress) {
+        return anonymousDeviceIdentityService == null ? null
+                : anonymousDeviceIdentityService.resolveAnonymous(deviceToken, clientAddress);
+    }
+
+    public AnonymousDeviceIdentityService.AuthenticationResult authenticateMediaIdentity(
+            String deviceToken, String discordUserId, String clientAddress) {
+        return anonymousDeviceIdentityService == null ? null
+                : anonymousDeviceIdentityService.authenticate(deviceToken, discordUserId, clientAddress);
+    }
+
+    public long anonymousDeviceCookieMaxAgeSeconds() {
+        return anonymousDeviceIdentityService == null ? 30L * 24L * 60L * 60L
+                : anonymousDeviceIdentityService.deviceCookieMaxAgeSeconds();
+    }
+
+    public long mediaMaxRetentionMillis(QuotaSubject quotaSubject) {
+        return imageShareService == null ? 0L : imageShareService.maxRetentionMillisFor(quotaSubject);
     }
 
     public ShortUrlEntry recordView(ShortUrlEntry entry, String clientAddress, String userAgent) {

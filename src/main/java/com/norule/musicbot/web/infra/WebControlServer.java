@@ -416,6 +416,10 @@ import java.util.regex.Pattern;
     public WebSessionManager sessionManager() {
         return sessionManager;
     }
+    public String authenticatedUserId(HttpExchange exchange) {
+        WebSessionManager.WebSession session = sessionManager.requireSession(exchange);
+        return session == null ? "" : session.userId;
+    }
     public DiscordOAuthClient discordOAuthClient() {
         return discordOAuthClient;
     }

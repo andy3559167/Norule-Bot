@@ -6,11 +6,13 @@ import com.norule.musicbot.web.session.WebSessionManager;
 import com.sun.net.httpserver.HttpExchange;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.UUID;
 
 public final class WebAuthService {
     private static final long OAUTH_STATE_TTL_MILLIS = 5 * 60_000L;
+    private static final String ANONYMOUS_DEVICE_COOKIE = "nr_anon_device";
 
     private final WebControlServer owner;
     private final WebSessionService webSessionService;
@@ -76,6 +78,18 @@ public final class WebAuthService {
                 return;
             }
 
+            try {
+                var mediaIdentity = owner.shortUrlService().authenticateMediaIdentity(
+                        readCookie(exchange, ANONYMOUS_DEVICE_COOKIE), userId, clientAddress(exchange));
+                if (mediaIdentity != null && mediaIdentity.mergeStatus()
+                        == com.norule.musicbot.shorturl.MediaSecurityRepository.IdentityMergeStatus.ACCOUNT_SWITCH_BLOCKED) {
+                    System.err.println("[NoRule] MEDIA_DEVICE_ACCOUNT_SWITCH discordUserId=" + userId);
+                }
+            } catch (RuntimeException identityFailure) {
+                System.err.println("[NoRule] Media identity merge failed after OAuth login: "
+                        + identityFailure.getClass().getSimpleName());
+            }
+
             long ttlMillis = Math.max(5, web.getSessionExpireMinutes()) * 60_000L;
             String sessionId = UUID.randomUUID().toString().replace("-", "");
             webSessionService.putSession(exchange, sessionId, userId, username, avatarUrl, accessToken,
@@ -109,5 +123,32 @@ public final class WebAuthService {
                 .put("id", session.userId)
                 .put("username", session.username)
                 .put("avatarUrl", session.avatarUrl));
+    }
+
+    private String readCookie(HttpExchange exchange, String name) {
+        String header = exchange.getRequestHeaders().getFirst("Cookie");
+        if (header == null || header.isBlank()) {
+            return "";
+        }
+        for (String part : header.split(";")) {
+            String[] pair = part.trim().split("=", 2);
+            if (pair.length == 2 && name.equals(pair[0].trim())) {
+                return pair[1].trim();
+            }
+        }
+        return "";
+    }
+
+    private String clientAddress(HttpExchange exchange) {
+        InetSocketAddress remoteAddress = exchange.getRemoteAddress();
+        String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank() && remoteAddress != null
+                && remoteAddress.getAddress() != null
+                && (remoteAddress.getAddress().isLoopbackAddress()
+                || remoteAddress.getAddress().isSiteLocalAddress())) {
+            return forwarded.split(",", 2)[0].trim();
+        }
+        return remoteAddress == null || remoteAddress.getAddress() == null
+                ? "unknown" : remoteAddress.getAddress().getHostAddress();
     }
 }

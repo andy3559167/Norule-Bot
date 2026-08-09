@@ -3,7 +3,10 @@ package com.norule.musicbot.shorturl.infra;
 import com.norule.musicbot.ShortUrlService;
 import com.norule.musicbot.config.BotConfig;
 import com.norule.musicbot.domain.shorturl.ImageShare;
+import com.norule.musicbot.domain.shorturl.QuotaSubject;
 import com.norule.musicbot.service.shorturl.ImageShareService;
+import com.norule.musicbot.service.shorturl.AnonymousDeviceIdentityService;
+import com.norule.musicbot.service.shorturl.MediaPasswordAttemptGuard;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import net.dv8tion.jda.api.utils.data.DataObject;
@@ -26,8 +29,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -36,6 +42,7 @@ public final class ShortUrlGatewayServer {
     private static final long IMAGE_ACCESS_DURATION_MILLIS = 60L * 60L * 1000L;
     private static final long VIEW_DEDUPLICATION_MILLIS = 60L * 1000L;
     private static final String IMAGE_ACCESS_COOKIE = "nr_image_access";
+    private static final String ANONYMOUS_DEVICE_COOKIE = "nr_anon_device";
     private static final SecureRandom IMAGE_ACCESS_RANDOM = new SecureRandom();
     private static final DateTimeFormatter IMAGE_DATE_FORMAT = DateTimeFormatter
             .ofPattern("yyyy/MM/dd HH:mm:ss")
@@ -48,13 +55,21 @@ public final class ShortUrlGatewayServer {
 
     private final ShortUrlService shortUrlService;
     private final Supplier<BotConfig.ShortUrl> configSupplier;
+    private final Function<HttpExchange, String> authenticatedUserResolver;
     private final Map<String, ImageAccessGrant> imageAccessGrants = new ConcurrentHashMap<>();
     private final Map<String, Long> recentViewers = new ConcurrentHashMap<>();
     private volatile HttpServer server;
+    private volatile ScheduledExecutorService maintenanceExecutor;
     private volatile String bindHost = "";
     private volatile int bindPort = -1;
 
     public ShortUrlGatewayServer(ShortUrlService shortUrlService, Supplier<BotConfig.ShortUrl> configSupplier) {
+        this(shortUrlService, configSupplier, exchange -> "");
+    }
+
+    public ShortUrlGatewayServer(ShortUrlService shortUrlService,
+                                 Supplier<BotConfig.ShortUrl> configSupplier,
+                                 Function<HttpExchange, String> authenticatedUserResolver) {
         if (shortUrlService == null) {
             throw new IllegalArgumentException("shortUrlService cannot be null");
         }
@@ -63,6 +78,8 @@ public final class ShortUrlGatewayServer {
         }
         this.shortUrlService = shortUrlService;
         this.configSupplier = configSupplier;
+        this.authenticatedUserResolver = authenticatedUserResolver == null ? exchange -> ""
+                : authenticatedUserResolver;
     }
 
     public synchronized void syncWithConfig() {
@@ -99,7 +116,27 @@ public final class ShortUrlGatewayServer {
                 return t;
             }));
             created.start();
+            try {
+                shortUrlService.cleanupExpired();
+            } catch (RuntimeException exception) {
+                System.err.println("[NoRule] Initial short URL media reconciliation failed: "
+                        + exception.getClass().getSimpleName());
+            }
+            ScheduledExecutorService maintenance = Executors.newSingleThreadScheduledExecutor(r -> {
+                Thread thread = new Thread(r, "NoRule-ShortUrl-Maintenance");
+                thread.setDaemon(true);
+                return thread;
+            });
+            maintenance.scheduleWithFixedDelay(() -> {
+                try {
+                    shortUrlService.cleanupExpired();
+                } catch (RuntimeException exception) {
+                    System.err.println("[NoRule] Short URL media maintenance failed: "
+                            + exception.getClass().getSimpleName());
+                }
+            }, config.getCleanupIntervalMinutes(), config.getCleanupIntervalMinutes(), TimeUnit.MINUTES);
             this.server = created;
+            this.maintenanceExecutor = maintenance;
             this.bindHost = config.getBindHost();
             this.bindPort = config.getBindPort();
             System.out.println("[NoRule] Short URL gateway started on http://" + config.getBindHost() + ":" + config.getBindPort());
@@ -109,6 +146,11 @@ public final class ShortUrlGatewayServer {
     }
 
     private void stop() {
+        ScheduledExecutorService maintenance = this.maintenanceExecutor;
+        if (maintenance != null) {
+            maintenance.shutdownNow();
+            this.maintenanceExecutor = null;
+        }
         HttpServer current = this.server;
         if (current == null) {
             return;
@@ -119,6 +161,7 @@ public final class ShortUrlGatewayServer {
     }
 
     private void handleResolve(HttpExchange exchange) throws IOException {
+        ensureAnonymousDevice(exchange);
         String rawPath = exchange.getRequestURI().getPath();
         if (rawPath == null || rawPath.isBlank() || "/".equals(rawPath)) {
             if (!isGetOrHead(exchange)) {
@@ -141,6 +184,11 @@ public final class ShortUrlGatewayServer {
         ImageShare imageShare = shortUrlService.resolveImageShare(code);
         if (imageShare != null) {
             handleImageShareResolve(exchange, imageShare);
+            return;
+        }
+
+        if (shortUrlService.findExpiredImageShare(code) != null) {
+            sendHtml(exchange, 410, buildImageExpiredPage());
             return;
         }
 
@@ -247,21 +295,27 @@ public final class ShortUrlGatewayServer {
                     .toString());
             return;
         }
+        QuotaSubject quotaSubject = resolveUploadQuotaSubject(exchange);
         ImageShareService.Options options = shortUrlService.imageShareOptions();
         if (options == null) {
             sendJson(exchange, 200, DataObject.empty().put("enabled", false).toString());
             return;
         }
+        long effectiveMaxRetentionMillis = shortUrlService.mediaMaxRetentionMillis(quotaSubject);
         sendJson(exchange, 200, DataObject.empty()
                 .put("enabled", options.enabled())
                 .put("defaultRetentionHours", options.defaultRetentionMillis() / (60L * 60L * 1000L))
-                .put("maxRetentionDays", options.maxRetentionMillis() / (24L * 60L * 60L * 1000L))
+                .put("maxRetentionDays", effectiveMaxRetentionMillis / (24L * 60L * 60L * 1000L))
+                .put("accessTier", quotaSubject == null ? "ANONYMOUS" : quotaSubject.accessTier().name())
                 .put("maxFileSizeBytes", options.maxFileSizeBytes())
                 .put("maxFileSizeMb", options.maxFileSizeBytes() / (1024L * 1024L))
                 .put("maxVideoFileSizeBytes", options.maxVideoFileSizeBytes())
                 .put("maxVideoFileSizeMb", options.maxVideoFileSizeBytes() / (1024L * 1024L))
                 .put("maxVideoDurationSeconds", options.maxVideoDurationMillis() / 1000L)
                 .put("expiredShareRetentionDays", options.expiredShareRetentionMillis() / (24L * 60L * 60L * 1000L))
+                .put("allowDateDefaultPassword", options.allowDateDefaultPassword())
+                .put("minPasswordLength", options.minPasswordLength())
+                .put("maxPasswordLength", options.maxPasswordLength())
                 .toString());
     }
 
@@ -270,6 +324,7 @@ public final class ShortUrlGatewayServer {
             sendImageError(exchange, 405, "METHOD_NOT_ALLOWED", "Method Not Allowed");
             return;
         }
+        QuotaSubject quotaSubject = resolveUploadQuotaSubject(exchange);
         ImageShareService.Options options = shortUrlService.imageShareOptions();
         if (options == null || !options.enabled()) {
             sendImageError(exchange, 503, "IMAGE_SHARING_DISABLED", "Image sharing is disabled");
@@ -298,7 +353,8 @@ public final class ShortUrlGatewayServer {
                             expiration.expiresAtMillis()
                     ),
                     clientAddress(exchange),
-                    userAgent(exchange)
+                    userAgent(exchange),
+                    quotaSubject
             );
             if (!result.isSuccess()) {
                 sendImageUploadFailure(exchange, result.error());
@@ -385,8 +441,10 @@ public final class ShortUrlGatewayServer {
             sendJson(exchange, 200, DataObject.empty().put("ok", true).toString());
             return;
         }
-        if (!shortUrlService.verifyImageSharePassword(imageShare, readPassword(exchange))) {
-            sendImageError(exchange, 403, "INVALID_PASSWORD", "Incorrect password");
+        MediaPasswordAttemptGuard.Result verification = shortUrlService.verifyImageSharePasswordGuarded(
+                imageShare, readPassword(exchange), clientAddress(exchange));
+        if (!verification.isSuccess()) {
+            sendPasswordVerificationFailure(exchange, verification);
             return;
         }
         issueImageAccess(exchange, imageShare);
@@ -505,6 +563,74 @@ public final class ShortUrlGatewayServer {
         return "";
     }
 
+    private AnonymousDeviceIdentityService.DeviceIdentity ensureAnonymousDevice(HttpExchange exchange) {
+        AnonymousDeviceIdentityService.DeviceIdentity identity = shortUrlService.resolveAnonymousDevice(
+                readCookie(exchange, ANONYMOUS_DEVICE_COOKIE), clientAddress(exchange));
+        if (identity == null || !identity.newlyCreated()) {
+            return identity;
+        }
+        String cookie = ANONYMOUS_DEVICE_COOKIE + "=" + identity.token()
+                + "; Max-Age=" + shortUrlService.anonymousDeviceCookieMaxAgeSeconds()
+                + "; Path=/; HttpOnly; Secure; SameSite=Lax";
+        exchange.getResponseHeaders().add("Set-Cookie", cookie);
+        return identity;
+    }
+
+    private QuotaSubject resolveUploadQuotaSubject(HttpExchange exchange) {
+        AnonymousDeviceIdentityService.DeviceIdentity device = ensureAnonymousDevice(exchange);
+        String discordUserId;
+        try {
+            discordUserId = authenticatedUserResolver.apply(exchange);
+        } catch (RuntimeException ignored) {
+            discordUserId = "";
+        }
+        if (discordUserId == null || discordUserId.isBlank()) {
+            return device == null ? null : device.quotaSubject();
+        }
+        AnonymousDeviceIdentityService.AuthenticationResult authenticated =
+                shortUrlService.authenticateMediaIdentity(
+                        device == null ? readCookie(exchange, ANONYMOUS_DEVICE_COOKIE) : device.token(),
+                        discordUserId, clientAddress(exchange));
+        return authenticated == null ? (device == null ? null : device.quotaSubject())
+                : authenticated.quotaSubject();
+    }
+
+    private void sendPasswordVerificationFailure(HttpExchange exchange,
+                                                 MediaPasswordAttemptGuard.Result result) throws IOException {
+        int status;
+        String errorCode;
+        String message;
+        switch (result.status()) {
+            case BUSY -> {
+                status = 503;
+                errorCode = "PASSWORD_VERIFICATION_BUSY";
+                message = "目前驗證請求較多，請稍後再試。";
+            }
+            case RATE_LIMITED, LOCKED -> {
+                status = 429;
+                errorCode = "PASSWORD_VERIFICATION_RATE_LIMITED";
+                message = "密碼嘗試過於頻繁，請稍後再試。";
+            }
+            case INVALID_PASSWORD -> {
+                status = 403;
+                errorCode = "INVALID_PASSWORD";
+                message = "Incorrect password";
+            }
+            case SUCCESS -> {
+                return;
+            }
+            default -> throw new IllegalStateException("Unexpected password verification status");
+        }
+        if (result.retryAfterSeconds() > 0L) {
+            exchange.getResponseHeaders().set("Retry-After", String.valueOf(result.retryAfterSeconds()));
+        }
+        DataObject body = DataObject.empty().put("error", message).put("errorCode", errorCode);
+        if (result.retryAfterSeconds() > 0L) {
+            body.put("retryAfterSeconds", result.retryAfterSeconds());
+        }
+        sendJson(exchange, status, body.toString());
+    }
+
     private void sendMedia(HttpExchange exchange, ImageShare imageShare) throws IOException {
         long fileSize = imageShare.sizeBytes();
         exchange.getResponseHeaders().set("Content-Type", imageShare.contentType());
@@ -613,7 +739,13 @@ public final class ShortUrlGatewayServer {
             case VIDEO_TOO_LARGE -> sendImageError(exchange, 413, "VIDEO_TOO_LARGE", "The uploaded video exceeds the configured size limit");
             case VIDEO_TOO_LONG -> sendImageError(exchange, 400, "VIDEO_TOO_LONG", "The uploaded video exceeds the configured duration limit");
             case RETENTION_TOO_LONG -> sendImageError(exchange, 400, "RETENTION_TOO_LONG", "The requested retention is outside the allowed range");
-            case INVALID_PASSWORD -> sendImageError(exchange, 400, "INVALID_PASSWORD", "Password must contain 4 to 128 characters");
+            case PASSWORD_REQUIRED -> sendImageError(exchange, 400, "MEDIA_PASSWORD_REQUIRED", "啟用密碼保護時必須設定密碼。");
+            case INVALID_PASSWORD -> sendImageError(exchange, 400, "INVALID_PASSWORD", "Password length is outside the configured range");
+            case UPLOAD_RATE_LIMITED -> sendImageError(exchange, 429, "MEDIA_UPLOAD_RATE_LIMITED", "Upload rate limit exceeded");
+            case DAILY_QUOTA_EXCEEDED -> sendImageError(exchange, 429, "MEDIA_DAILY_QUOTA_EXCEEDED", "Daily upload quota exceeded");
+            case ACTIVE_STORAGE_QUOTA_EXCEEDED -> sendImageError(exchange, 413, "MEDIA_ACTIVE_STORAGE_QUOTA_EXCEEDED", "Active storage quota exceeded");
+            case GLOBAL_STORAGE_FULL -> sendImageError(exchange, 503, "MEDIA_MANAGED_STORAGE_FULL", "Managed media storage is full");
+            case FILESYSTEM_FULL -> sendImageError(exchange, 503, "MEDIA_FILESYSTEM_FULL", "Media uploads are paused because filesystem usage is too high");
             case STORAGE_FAILED -> sendImageError(exchange, 500, "MEDIA_STORAGE_FAILED", "Unable to store the uploaded media");
             case PERSISTENCE_FAILED -> sendImageError(exchange, 500, "MEDIA_PERSISTENCE_FAILED", "Unable to save the media share record");
             case CREATE_FAILED -> sendImageError(exchange, 500, "IMAGE_CREATE_FAILED", "Unable to create image share");
@@ -920,14 +1052,20 @@ public final class ShortUrlGatewayServer {
     }
 
     private String clientAddress(HttpExchange exchange) {
+        InetSocketAddress remoteAddress = exchange.getRemoteAddress();
         String forwarded = exchange.getRequestHeaders().getFirst("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
+        if (forwarded != null && !forwarded.isBlank() && isTrustedLocalProxy(remoteAddress)) {
             return forwarded.split(",", 2)[0].trim();
         }
-        InetSocketAddress remoteAddress = exchange.getRemoteAddress();
         return remoteAddress == null || remoteAddress.getAddress() == null
                 ? "unknown"
                 : remoteAddress.getAddress().getHostAddress();
+    }
+
+    private boolean isTrustedLocalProxy(InetSocketAddress remoteAddress) {
+        return remoteAddress != null && remoteAddress.getAddress() != null
+                && (remoteAddress.getAddress().isLoopbackAddress()
+                || remoteAddress.getAddress().isSiteLocalAddress());
     }
 
     private String userAgent(HttpExchange exchange) {

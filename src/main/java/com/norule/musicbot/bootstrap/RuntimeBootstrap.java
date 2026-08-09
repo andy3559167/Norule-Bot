@@ -38,9 +38,15 @@ import com.norule.musicbot.shorturl.MySqlImageShareRepository;
 import com.norule.musicbot.shorturl.ShortUrlRepository;
 import com.norule.musicbot.shorturl.SqliteImageShareRepository;
 import com.norule.musicbot.shorturl.SqliteShortUrlRepository;
+import com.norule.musicbot.shorturl.MediaSecurityRepository;
+import com.norule.musicbot.shorturl.MySqlMediaSecurityRepository;
+import com.norule.musicbot.shorturl.SqliteMediaSecurityRepository;
 import com.norule.musicbot.shorturl.infra.FileSystemImageShareStorage;
 import com.norule.musicbot.shorturl.infra.ShortUrlGatewayServer;
 import com.norule.musicbot.service.shorturl.ImageShareService;
+import com.norule.musicbot.service.shorturl.AnonymousDeviceIdentityService;
+import com.norule.musicbot.service.shorturl.MediaPasswordAttemptGuard;
+import com.norule.musicbot.service.shorturl.MediaQuotaService;
 import com.norule.musicbot.storage.sqlite.GuildSettingsSqliteRepository;
 import com.norule.musicbot.storage.sqlite.HoneypotSqliteRepository;
 import com.norule.musicbot.storage.sqlite.ModerationSqliteRepository;
@@ -1003,19 +1009,42 @@ public final class RuntimeBootstrap {
 
     private static ShortUrlService createShortUrlService(BotConfig config, Path baseDir) {
         ShortUrlConfig shortUrlConfig = new ShortUrlConfig(config.getShortUrl());
+        String quotaHmacSecret = mediaSecuritySecret(shortUrlConfig, "SHORT_URL_QUOTA_HMAC_SECRET");
+        String deviceHmacSecret = mediaSecuritySecret(shortUrlConfig, "SHORT_URL_DEVICE_HMAC_SECRET");
         ShortUrlRepository repository = createShortUrlRepository(shortUrlConfig, baseDir);
-        ImageShareService imageShareService = createImageShareService(shortUrlConfig, repository, baseDir);
-        return new ShortUrlService(repository, shortUrlConfig.toOptions(), imageShareService);
+        MediaSecurityRepository securityRepository = createMediaSecurityRepository(shortUrlConfig, baseDir);
+        ImageShareService imageShareService = createImageShareService(
+                shortUrlConfig, repository, securityRepository, quotaHmacSecret, baseDir);
+        AnonymousDeviceIdentityService identityService = new AnonymousDeviceIdentityService(
+                securityRepository,
+                shortUrlConfig.getIdentityContinuityOptions(),
+                quotaHmacSecret,
+                deviceHmacSecret
+        );
+        return new ShortUrlService(repository, shortUrlConfig.toOptions(), imageShareService, identityService);
     }
 
     private static ImageShareService createImageShareService(ShortUrlConfig config,
                                                               ShortUrlRepository shortUrlRepository,
+                                                              MediaSecurityRepository securityRepository,
+                                                              String quotaHmacSecret,
                                                               Path baseDir) {
         ImageShareRepository imageRepository = createImageShareRepository(config, baseDir);
         FileSystemImageShareStorage storage = new FileSystemImageShareStorage(
-                resolveDataPath(baseDir, config.getImage().getStoragePath())
+                resolveDataPath(baseDir, config.getImage().getStoragePath()),
+                resolveDataPath(baseDir, config.getTemporaryStoragePath()),
+                resolveDataPath(baseDir, config.getExpiredArchivePath())
         );
-        return new ImageShareService(imageRepository, shortUrlRepository, storage, config.toImageShareOptions());
+        MediaPasswordAttemptGuard passwordGuard = new MediaPasswordAttemptGuard(
+                securityRepository,
+                config.getPasswordProtectionOptions(),
+                quotaHmacSecret
+        );
+        MediaQuotaService quotaService = new MediaQuotaService(
+                securityRepository, config.getMediaQuotaOptions());
+        return new ImageShareService(imageRepository, shortUrlRepository, storage,
+                config.toImageShareOptions(), java.time.Clock.systemUTC(),
+                new ImageShareService.SecurityDependencies(passwordGuard, quotaService));
     }
 
     private static ShortUrlRepository createShortUrlRepository(ShortUrlConfig config, Path baseDir) {
@@ -1048,6 +1077,29 @@ public final class RuntimeBootstrap {
         return new SqliteImageShareRepository(dbPath);
     }
 
+    private static MediaSecurityRepository createMediaSecurityRepository(ShortUrlConfig config, Path baseDir) {
+        String storage = config.getStorage() == null ? STORAGE_SQLITE
+                : config.getStorage().trim().toLowerCase(Locale.ROOT);
+        if ("mysql".equals(storage)) {
+            ShortUrlConfig.Mysql mysql = config.getMysql();
+            return new MySqlMediaSecurityRepository(
+                    mysql.getJdbcUrl(), mysql.getUsername(), mysql.getPassword(), mysql.getPoolSize());
+        }
+        return new SqliteMediaSecurityRepository(resolveDataPath(baseDir, config.getSqlite().getPath()));
+    }
+
+    private static String mediaSecuritySecret(ShortUrlConfig config, String environmentName) {
+        String value = System.getenv(environmentName);
+        if (value != null && !value.isBlank()) {
+            return value.trim();
+        }
+        if (config.isEnabled() && config.getImage().isEnabled()) {
+            throw new IllegalStateException(environmentName
+                    + " is required when short URL media sharing is enabled");
+        }
+        return "disabled-short-url-media-secret";
+    }
+
     private static void syncShortUrlGateway() {
         BotConfig runtime = RUNTIME_CONFIG.get();
         ShortUrlService shortUrlService = SHORT_URL_SERVICE.get();
@@ -1059,6 +1111,9 @@ public final class RuntimeBootstrap {
             gatewayServer = new ShortUrlGatewayServer(shortUrlService, () -> {
                 BotConfig cfg = RUNTIME_CONFIG.get();
                 return cfg == null ? BotConfig.ShortUrl.defaultValues() : cfg.getShortUrl();
+            }, exchange -> {
+                WebControlServer webServer = WEB_SERVER.get();
+                return webServer == null ? "" : webServer.authenticatedUserId(exchange);
             });
             SHORT_URL_GATEWAY_SERVER.set(gatewayServer);
         }

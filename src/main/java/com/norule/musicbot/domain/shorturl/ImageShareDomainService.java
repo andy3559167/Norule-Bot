@@ -42,8 +42,14 @@ public final class ImageShareDomainService {
     }
 
     public boolean isValidPassword(String password) {
+        return isValidPassword(password, 4, 128);
+    }
+
+    public boolean isValidPassword(String password, int minimumLength, int maximumLength) {
         int length = password == null ? 0 : password.length();
-        return length >= 4 && length <= 128;
+        int safeMinimum = Math.max(1, minimumLength);
+        int safeMaximum = Math.max(safeMinimum, maximumLength);
+        return length >= safeMinimum && length <= safeMaximum;
     }
 
     public String defaultPassword(LocalDate date) {

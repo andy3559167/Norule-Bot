@@ -73,6 +73,20 @@ class ImageShareServiceTest {
     }
 
     @Test
+    void rejectsBlankProtectedPasswordWhenDateDefaultIsDisabled() {
+        ImageShareService service = createService(Clock.systemUTC(), new ImageShareService.Options(
+                true, 60L * 60L * 1000L, 24L * 60L * 60L * 1000L,
+                20L * 1024L * 1024L, 100L * 1024L * 1024L, 5L * 60L * 1000L,
+                30L * 24L * 60L * 60L * 1000L, 60_000L, 7,
+                false, 8, 128, 80));
+
+        ImageShareService.UploadResult result = service.create(
+                new ImageShareService.Upload(PNG, true, "", 0L));
+
+        assertEquals(ImageShareService.UploadError.PASSWORD_REQUIRED, result.error());
+    }
+
+    @Test
     void reusesTheActiveLinkWhenImageAccessAndRetentionMatch() {
         ImageShareService service = createService(Clock.fixed(Instant.parse("2026-07-11T12:00:00Z"), ZoneOffset.UTC), new ImageShareService.Options(
                 true, 60L * 60L * 1000L, 24L * 60L * 60L * 1000L, 20L * 1024L * 1024L,
@@ -156,7 +170,7 @@ class ImageShareServiceTest {
     }
 
     @Test
-    void retainsExpiredMediaForTheConfiguredPeriod() throws Exception {
+    void archivesExpiredMediaInsteadOfDeletingIt() throws Exception {
         MutableClock clock = new MutableClock(Instant.parse("2026-07-11T12:00:00Z"));
         InMemoryImageRepository repository = new InMemoryImageRepository();
         InMemoryImageStorage storage = new InMemoryImageStorage();
@@ -183,17 +197,20 @@ class ImageShareServiceTest {
         assertNull(service.resolve(image.code()));
         assertNull(service.open(image));
         assertNotNull(service.findExpired(video.code()));
+        assertFalse(storage.exists(video));
+        assertFalse(storage.exists(image));
+        assertTrue(storage.existsArchived(video));
+        assertTrue(storage.existsArchived(image));
 
         service.cleanupExpired();
-        assertTrue(storage.exists(video));
-        assertTrue(storage.exists(image));
         assertNotNull(service.findExpired(image.code()));
 
         clock.advanceMillis(retention);
         service.cleanupExpired();
         assertFalse(storage.exists(video));
-        assertNull(service.findExpired(video.code()));
-        assertNull(service.findExpired(image.code()));
+        assertTrue(storage.existsArchived(video));
+        assertNotNull(service.findExpired(video.code()));
+        assertNotNull(service.findExpired(image.code()));
     }
 
     @Test
@@ -379,6 +396,7 @@ class ImageShareServiceTest {
 
     private static final class InMemoryImageStorage implements ImageShareStorage {
         private final Map<String, byte[]> files = new LinkedHashMap<>();
+        private final Map<String, byte[]> archivedFiles = new LinkedHashMap<>();
 
         @Override
         public void save(ImageShare imageShare, byte[] content) {
@@ -398,6 +416,20 @@ class ImageShareServiceTest {
         @Override
         public void delete(ImageShare imageShare) {
             files.remove(imageShare.storageName());
+        }
+
+        @Override
+        public String archive(ImageShare imageShare) {
+            byte[] content = files.remove(imageShare.storageName());
+            if (content != null) {
+                archivedFiles.put(imageShare.storageName(), content);
+            }
+            return imageShare.storageName();
+        }
+
+        @Override
+        public boolean existsArchived(ImageShare imageShare) {
+            return archivedFiles.containsKey(imageShare.storageName());
         }
     }
 

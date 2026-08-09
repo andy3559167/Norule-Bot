@@ -3,6 +3,9 @@ package com.norule.musicbot.config.domain;
 import com.norule.musicbot.ShortUrlService;
 import com.norule.musicbot.config.BotConfig;
 import com.norule.musicbot.service.shorturl.ImageShareService;
+import com.norule.musicbot.service.shorturl.AnonymousDeviceIdentityService;
+import com.norule.musicbot.service.shorturl.MediaPasswordAttemptGuard;
+import com.norule.musicbot.service.shorturl.MediaQuotaService;
 import java.util.Locale;
 
 public final class ShortUrlConfig {
@@ -88,6 +91,15 @@ public final class ShortUrlConfig {
     private final Image image;
     private final Mysql mysql;
     private final Sqlite sqlite;
+    private final MediaPasswordAttemptGuard.Options passwordProtectionOptions;
+    private final AnonymousDeviceIdentityService.Options identityContinuityOptions;
+    private final MediaQuotaService.Options mediaQuotaOptions;
+    private final String temporaryStoragePath;
+    private final String expiredArchivePath;
+    private final int filesystemStopPercent;
+    private final boolean allowDateDefaultPassword;
+    private final int minPasswordLength;
+    private final int maxPasswordLength;
 
     public ShortUrlConfig(boolean enabled,
                           String bindHost,
@@ -139,6 +151,15 @@ public final class ShortUrlConfig {
                 : image;
         this.mysql = mysql == null ? new Mysql("", "", "", 8) : mysql;
         this.sqlite = sqlite == null ? new Sqlite("data/norule.db") : sqlite;
+        this.passwordProtectionOptions = MediaPasswordAttemptGuard.Options.defaults();
+        this.identityContinuityOptions = AnonymousDeviceIdentityService.Options.defaults();
+        this.mediaQuotaOptions = MediaQuotaService.Options.defaults();
+        this.temporaryStoragePath = "data/tmp/uploads";
+        this.expiredArchivePath = "data/short-url-expired";
+        this.filesystemStopPercent = 80;
+        this.allowDateDefaultPassword = true;
+        this.minPasswordLength = 4;
+        this.maxPasswordLength = 128;
     }
 
     public ShortUrlConfig(BotConfig.ShortUrl config) {
@@ -153,6 +174,10 @@ public final class ShortUrlConfig {
         this.dedupe = source.isDedupe();
         this.ttlDays = source.getTtlDays();
         this.cleanupIntervalMinutes = source.getCleanupIntervalMinutes();
+        BotConfig.ShortUrl.Image.AbuseProtection abuse = source.getImage().getAbuseProtection();
+        BotConfig.ShortUrl.Image.PasswordProtection password = abuse.getPasswordProtection();
+        BotConfig.ShortUrl.Image.IdentityContinuity identity = abuse.getIdentityContinuity();
+        BotConfig.ShortUrl.Image.Storage mediaStorage = abuse.getStorage();
         this.image = new Image(
                 source.getImage().isEnabled(),
                 source.getImage().getDefaultRetentionHours(),
@@ -161,7 +186,7 @@ public final class ShortUrlConfig {
                 source.getImage().getMaxVideoFileSizeMb(),
                 source.getImage().getMaxVideoDurationSeconds(),
                 source.getImage().getExpiredShareRetentionDays(),
-                source.getImage().getStoragePath()
+                mediaStorage.getActivePath()
         );
         this.mysql = new Mysql(
                 source.getMysql().getJdbcUrl(),
@@ -170,6 +195,33 @@ public final class ShortUrlConfig {
                 source.getMysql().getPoolSize()
         );
         this.sqlite = new Sqlite(source.getSqlite().getPath());
+        this.passwordProtectionOptions = new MediaPasswordAttemptGuard.Options(
+                password.isEnabled(),
+                password.getMaxFailedAttempts(),
+                password.getFailureWindowMinutes() * 60L * 1000L,
+                password.getLockMinutes() * 60L * 1000L,
+                password.getBackoffInitialSeconds() * 1000L,
+                password.getBackoffMultiplier(),
+                password.getBackoffMaxSeconds() * 1000L,
+                password.getMaxConcurrentVerifications(),
+                password.getPerIp().getMaxVerificationRequestsPerMinute(),
+                password.getPerIp().getMaxVerificationRequestsPer10Minutes()
+        );
+        this.identityContinuityOptions = new AnonymousDeviceIdentityService.Options(
+                identity.isEnabled(),
+                identity.getAnonymousToAccountMergeWindowMinutes() * 60L * 1000L,
+                identity.getDeviceLinkTtlDays() * 24L * 60L * 60L * 1000L,
+                identity.getDeviceAccountSwitchCooldownHours() * 60L * 60L * 1000L
+        );
+        MediaQuotaService.Options defaults = MediaQuotaService.Options.defaults();
+        this.mediaQuotaOptions = new MediaQuotaService.Options(true, defaults.anonymous(),
+                defaults.authenticated(), mediaStorage.getMaxTotalStorageGb() * 1024L * 1024L * 1024L);
+        this.temporaryStoragePath = mediaStorage.getTempPath();
+        this.expiredArchivePath = mediaStorage.getExpiredArchivePath();
+        this.filesystemStopPercent = mediaStorage.getFilesystemStopPercent();
+        this.allowDateDefaultPassword = password.isAllowDateDefaultPassword();
+        this.minPasswordLength = password.getMinPasswordLength();
+        this.maxPasswordLength = password.getMaxPasswordLength();
     }
 
     public ShortUrlService.Options toOptions() {
@@ -193,7 +245,11 @@ public final class ShortUrlConfig {
                 image.getMaxVideoDurationSeconds() * 1000L,
                 image.getExpiredShareRetentionDays() * 24L * 60L * 60L * 1000L,
                 cleanupIntervalMinutes * 60L * 1000L,
-                codeLength
+                codeLength,
+                allowDateDefaultPassword,
+                minPasswordLength,
+                maxPasswordLength,
+                filesystemStopPercent
         );
     }
 
@@ -214,6 +270,12 @@ public final class ShortUrlConfig {
     public Image getImage() { return image; }
     public Mysql getMysql() { return mysql; }
     public Sqlite getSqlite() { return sqlite; }
+    public MediaPasswordAttemptGuard.Options getPasswordProtectionOptions() { return passwordProtectionOptions; }
+    public AnonymousDeviceIdentityService.Options getIdentityContinuityOptions() { return identityContinuityOptions; }
+    public MediaQuotaService.Options getMediaQuotaOptions() { return mediaQuotaOptions; }
+    public String getTemporaryStoragePath() { return temporaryStoragePath; }
+    public String getExpiredArchivePath() { return expiredArchivePath; }
+    public int getFilesystemStopPercent() { return filesystemStopPercent; }
 
     private static String normalizeStorage(String storage) {
         return storage == null ? "sqlite" : storage.trim().toLowerCase(Locale.ROOT);

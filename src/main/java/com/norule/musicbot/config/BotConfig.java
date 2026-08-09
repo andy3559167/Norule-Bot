@@ -2707,6 +2707,240 @@ public String getToken() {
             private static final int MAX_VIDEO_DURATION_SECONDS = 5 * 60;
             private static final int DEFAULT_EXPIRED_SHARE_RETENTION_DAYS = 30;
 
+            public static final class IdentityContinuity {
+                private final boolean enabled;
+                private final int anonymousToAccountMergeWindowMinutes;
+                private final int deviceLinkTtlDays;
+                private final int deviceAccountSwitchCooldownHours;
+
+                private IdentityContinuity(boolean enabled, int mergeWindowMinutes,
+                                           int deviceLinkTtlDays, int switchCooldownHours) {
+                    this.enabled = enabled;
+                    this.anonymousToAccountMergeWindowMinutes = Math.max(1, mergeWindowMinutes);
+                    this.deviceLinkTtlDays = Math.max(1, deviceLinkTtlDays);
+                    this.deviceAccountSwitchCooldownHours = Math.max(0, switchCooldownHours);
+                }
+
+                private static IdentityContinuity fromMap(Map<String, Object> map,
+                                                          IdentityContinuity fallback) {
+                    IdentityContinuity defaults = fallback == null ? defaultValues() : fallback;
+                    return new IdentityContinuity(
+                            getBoolean(map, "enabled", defaults.isEnabled()),
+                            getInt(map, "anonymousToAccountMergeWindowMinutes",
+                                    defaults.getAnonymousToAccountMergeWindowMinutes()),
+                            getInt(map, "deviceLinkTtlDays", defaults.getDeviceLinkTtlDays()),
+                            getInt(map, "deviceAccountSwitchCooldownHours",
+                                    defaults.getDeviceAccountSwitchCooldownHours()));
+                }
+
+                private static IdentityContinuity defaultValues() {
+                    return new IdentityContinuity(true, 120, 30, 24);
+                }
+
+                public boolean isEnabled() { return enabled; }
+                public int getAnonymousToAccountMergeWindowMinutes() {
+                    return anonymousToAccountMergeWindowMinutes;
+                }
+                public int getDeviceLinkTtlDays() { return deviceLinkTtlDays; }
+                public int getDeviceAccountSwitchCooldownHours() {
+                    return deviceAccountSwitchCooldownHours;
+                }
+            }
+
+            public static final class PasswordProtection {
+                public static final class PerIp {
+                    private final int maxVerificationRequestsPerMinute;
+                    private final int maxVerificationRequestsPer10Minutes;
+
+                    private PerIp(int perMinute, int perTenMinutes) {
+                        this.maxVerificationRequestsPerMinute = Math.max(1, perMinute);
+                        this.maxVerificationRequestsPer10Minutes = Math.max(
+                                this.maxVerificationRequestsPerMinute, perTenMinutes);
+                    }
+
+                    private static PerIp fromMap(Map<String, Object> map, PerIp fallback) {
+                        PerIp defaults = fallback == null ? defaultValues() : fallback;
+                        return new PerIp(
+                                getInt(map, "maxVerificationRequestsPerMinute",
+                                        defaults.getMaxVerificationRequestsPerMinute()),
+                                getInt(map, "maxVerificationRequestsPer10Minutes",
+                                        defaults.getMaxVerificationRequestsPer10Minutes()));
+                    }
+
+                    private static PerIp defaultValues() { return new PerIp(20, 100); }
+                    public int getMaxVerificationRequestsPerMinute() {
+                        return maxVerificationRequestsPerMinute;
+                    }
+                    public int getMaxVerificationRequestsPer10Minutes() {
+                        return maxVerificationRequestsPer10Minutes;
+                    }
+                }
+
+                private final boolean enabled;
+                private final boolean allowDateDefaultPassword;
+                private final int minPasswordLength;
+                private final int maxPasswordLength;
+                private final int maxFailedAttempts;
+                private final int failureWindowMinutes;
+                private final int lockMinutes;
+                private final int backoffInitialSeconds;
+                private final int backoffMultiplier;
+                private final int backoffMaxSeconds;
+                private final int maxConcurrentVerifications;
+                private final PerIp perIp;
+
+                private PasswordProtection(boolean enabled, boolean allowDateDefaultPassword,
+                                           int minPasswordLength, int maxPasswordLength,
+                                           int maxFailedAttempts, int failureWindowMinutes,
+                                           int lockMinutes, int backoffInitialSeconds,
+                                           int backoffMultiplier, int backoffMaxSeconds,
+                                           int maxConcurrentVerifications, PerIp perIp) {
+                    this.enabled = enabled;
+                    this.allowDateDefaultPassword = allowDateDefaultPassword;
+                    this.minPasswordLength = Math.max(1, Math.min(128, minPasswordLength));
+                    this.maxPasswordLength = Math.max(this.minPasswordLength,
+                            Math.min(128, maxPasswordLength));
+                    this.maxFailedAttempts = Math.max(1, maxFailedAttempts);
+                    this.failureWindowMinutes = Math.max(1, failureWindowMinutes);
+                    this.lockMinutes = Math.max(1, lockMinutes);
+                    this.backoffInitialSeconds = Math.max(0, backoffInitialSeconds);
+                    this.backoffMultiplier = Math.max(1, backoffMultiplier);
+                    this.backoffMaxSeconds = Math.max(this.backoffInitialSeconds, backoffMaxSeconds);
+                    this.maxConcurrentVerifications = Math.max(1, maxConcurrentVerifications);
+                    this.perIp = perIp == null ? PerIp.defaultValues() : perIp;
+                }
+
+                private static PasswordProtection fromMap(Map<String, Object> map,
+                                                          PasswordProtection fallback) {
+                    PasswordProtection defaults = fallback == null ? defaultValues() : fallback;
+                    return new PasswordProtection(
+                            getBoolean(map, "enabled", defaults.isEnabled()),
+                            getBoolean(map, "allowDateDefaultPassword",
+                                    defaults.isAllowDateDefaultPassword()),
+                            getInt(map, "minPasswordLength", defaults.getMinPasswordLength()),
+                            getInt(map, "maxPasswordLength", defaults.getMaxPasswordLength()),
+                            getInt(map, "maxFailedAttempts", defaults.getMaxFailedAttempts()),
+                            getInt(map, "failureWindowMinutes", defaults.getFailureWindowMinutes()),
+                            getInt(map, "lockMinutes", defaults.getLockMinutes()),
+                            getInt(map, "backoffInitialSeconds", defaults.getBackoffInitialSeconds()),
+                            getInt(map, "backoffMultiplier", defaults.getBackoffMultiplier()),
+                            getInt(map, "backoffMaxSeconds", defaults.getBackoffMaxSeconds()),
+                            getInt(map, "maxConcurrentVerifications",
+                                    defaults.getMaxConcurrentVerifications()),
+                            PerIp.fromMap(asMap(map.get("perIp")), defaults.getPerIp()));
+                }
+
+                private static PasswordProtection defaultValues() {
+                    return new PasswordProtection(true, true, 4, 128, 5, 10,
+                            10, 1, 2, 30, 8, PerIp.defaultValues());
+                }
+
+                public boolean isEnabled() { return enabled; }
+                public boolean isAllowDateDefaultPassword() { return allowDateDefaultPassword; }
+                public int getMinPasswordLength() { return minPasswordLength; }
+                public int getMaxPasswordLength() { return maxPasswordLength; }
+                public int getMaxFailedAttempts() { return maxFailedAttempts; }
+                public int getFailureWindowMinutes() { return failureWindowMinutes; }
+                public int getLockMinutes() { return lockMinutes; }
+                public int getBackoffInitialSeconds() { return backoffInitialSeconds; }
+                public int getBackoffMultiplier() { return backoffMultiplier; }
+                public int getBackoffMaxSeconds() { return backoffMaxSeconds; }
+                public int getMaxConcurrentVerifications() { return maxConcurrentVerifications; }
+                public PerIp getPerIp() { return perIp; }
+            }
+
+            public static final class Storage {
+                private final String activePath;
+                private final String tempPath;
+                private final String expiredArchivePath;
+                private final int maxTotalStorageGb;
+                private final int warningPercent;
+                private final int filesystemStopPercent;
+
+                private Storage(String activePath, String tempPath, String expiredArchivePath,
+                                int maxTotalStorageGb, int warningPercent, int filesystemStopPercent) {
+                    this.activePath = pathOrDefault(activePath, "data/short-url-images");
+                    this.tempPath = pathOrDefault(tempPath, "data/tmp/uploads");
+                    this.expiredArchivePath = pathOrDefault(expiredArchivePath,
+                            "data/short-url-expired");
+                    this.maxTotalStorageGb = Math.max(1, maxTotalStorageGb);
+                    this.warningPercent = Math.max(1, Math.min(99, warningPercent));
+                    this.filesystemStopPercent = Math.max(this.warningPercent,
+                            Math.min(100, filesystemStopPercent));
+                }
+
+                private static Storage fromMap(Map<String, Object> map, Storage fallback,
+                                               String legacyActivePath) {
+                    Storage defaults = fallback == null ? defaultValues() : fallback;
+                    String configuredActivePath = getString(map, "activePath", defaults.getActivePath());
+                    if (legacyActivePath != null && !legacyActivePath.isBlank()
+                            && !"data/short-url-images".equals(legacyActivePath)
+                            && defaults.getActivePath().equals(configuredActivePath)) {
+                        configuredActivePath = legacyActivePath;
+                    }
+                    return new Storage(
+                            configuredActivePath,
+                            getString(map, "tempPath", defaults.getTempPath()),
+                            getString(map, "expiredArchivePath", defaults.getExpiredArchivePath()),
+                            getInt(map, "maxTotalStorageGb", defaults.getMaxTotalStorageGb()),
+                            getInt(map, "warningPercent", defaults.getWarningPercent()),
+                            getInt(map, "filesystemStopPercent", defaults.getFilesystemStopPercent()));
+                }
+
+                private static Storage defaultValues() {
+                    return new Storage("data/short-url-images", "data/tmp/uploads",
+                            "data/short-url-expired", 50, 70, 80);
+                }
+
+                private static String pathOrDefault(String value, String fallback) {
+                    return value == null || value.isBlank() ? fallback : value.trim();
+                }
+
+                public String getActivePath() { return activePath; }
+                public String getTempPath() { return tempPath; }
+                public String getExpiredArchivePath() { return expiredArchivePath; }
+                public int getMaxTotalStorageGb() { return maxTotalStorageGb; }
+                public int getWarningPercent() { return warningPercent; }
+                public int getFilesystemStopPercent() { return filesystemStopPercent; }
+            }
+
+            public static final class AbuseProtection {
+                private final IdentityContinuity identityContinuity;
+                private final PasswordProtection passwordProtection;
+                private final Storage storage;
+
+                private AbuseProtection(IdentityContinuity identityContinuity,
+                                        PasswordProtection passwordProtection, Storage storage) {
+                    this.identityContinuity = identityContinuity == null
+                            ? IdentityContinuity.defaultValues() : identityContinuity;
+                    this.passwordProtection = passwordProtection == null
+                            ? PasswordProtection.defaultValues() : passwordProtection;
+                    this.storage = storage == null ? Storage.defaultValues() : storage;
+                }
+
+                private static AbuseProtection fromMap(Map<String, Object> map,
+                                                       AbuseProtection fallback,
+                                                       String legacyActivePath) {
+                    AbuseProtection defaults = fallback == null ? defaultValues() : fallback;
+                    return new AbuseProtection(
+                            IdentityContinuity.fromMap(asMap(map.get("identityContinuity")),
+                                    defaults.getIdentityContinuity()),
+                            PasswordProtection.fromMap(asMap(map.get("passwordProtection")),
+                                    defaults.getPasswordProtection()),
+                            Storage.fromMap(asMap(map.get("storage")), defaults.getStorage(),
+                                    legacyActivePath));
+                }
+
+                private static AbuseProtection defaultValues() {
+                    return new AbuseProtection(IdentityContinuity.defaultValues(),
+                            PasswordProtection.defaultValues(), Storage.defaultValues());
+                }
+
+                public IdentityContinuity getIdentityContinuity() { return identityContinuity; }
+                public PasswordProtection getPasswordProtection() { return passwordProtection; }
+                public Storage getStorage() { return storage; }
+            }
+
             private final boolean enabled;
             private final int defaultRetentionHours;
             private final int maxRetentionDays;
@@ -2715,6 +2949,7 @@ public String getToken() {
             private final int maxVideoDurationSeconds;
             private final int expiredShareRetentionDays;
             private final String storagePath;
+            private final AbuseProtection abuseProtection;
 
             private Image(boolean enabled,
                           int defaultRetentionHours,
@@ -2723,7 +2958,8 @@ public String getToken() {
                           int maxVideoFileSizeMb,
                           int maxVideoDurationSeconds,
                           int expiredShareRetentionDays,
-                          String storagePath) {
+                          String storagePath,
+                          AbuseProtection abuseProtection) {
                 this.enabled = enabled;
                 this.maxRetentionDays = Math.max(1, Math.min(MAX_RETENTION_DAYS, maxRetentionDays));
                 this.defaultRetentionHours = Math.max(1, Math.min(this.maxRetentionDays * 24, defaultRetentionHours));
@@ -2735,10 +2971,13 @@ public String getToken() {
                 this.storagePath = storagePath == null || storagePath.isBlank()
                         ? "data/short-url-images"
                         : storagePath.trim();
+                this.abuseProtection = abuseProtection == null
+                        ? AbuseProtection.defaultValues() : abuseProtection;
             }
 
             private static Image fromMap(Map<String, Object> map, Image fallback) {
                 Image defaults = fallback == null ? defaultValues() : fallback;
+                String storagePath = getString(map, "storagePath", defaults.getStoragePath());
                 return new Image(
                         getBoolean(map, "enabled", defaults.isEnabled()),
                         getInt(map, "defaultRetentionHours", defaults.getDefaultRetentionHours()),
@@ -2747,14 +2986,16 @@ public String getToken() {
                         getInt(map, "maxVideoFileSizeMb", defaults.getMaxVideoFileSizeMb()),
                         getInt(map, "maxVideoDurationSeconds", defaults.getMaxVideoDurationSeconds()),
                         getInt(map, "expiredShareRetentionDays", defaults.getExpiredShareRetentionDays()),
-                        getString(map, "storagePath", defaults.getStoragePath())
+                        storagePath,
+                        AbuseProtection.fromMap(asMap(map.get("abuseProtection")),
+                                defaults.getAbuseProtection(), storagePath)
                 );
             }
 
             private static Image defaultValues() {
                 return new Image(true, 1, MAX_RETENTION_DAYS, MAX_FILE_SIZE_MB,
                         MAX_VIDEO_FILE_SIZE_MB, MAX_VIDEO_DURATION_SECONDS, DEFAULT_EXPIRED_SHARE_RETENTION_DAYS,
-                        "data/short-url-images");
+                        "data/short-url-images", AbuseProtection.defaultValues());
             }
 
             public boolean isEnabled() {
@@ -2787,6 +3028,10 @@ public String getToken() {
 
             public String getStoragePath() {
                 return storagePath;
+            }
+
+            public AbuseProtection getAbuseProtection() {
+                return abuseProtection;
             }
         }
 

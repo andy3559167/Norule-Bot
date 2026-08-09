@@ -1,6 +1,8 @@
 package com.norule.musicbot.shorturl;
 
 import com.norule.musicbot.domain.shorturl.ImageShare;
+import com.norule.musicbot.domain.shorturl.MediaOwnerType;
+import com.norule.musicbot.domain.shorturl.MediaStorageState;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +14,7 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public final class SqliteImageShareRepository implements ImageShareRepository {
     private static final String CREATE_TABLE = """
@@ -24,21 +27,31 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
                 expires_at INTEGER NOT NULL,
                 password_hash TEXT NOT NULL DEFAULT '',
                 content_hash TEXT NOT NULL DEFAULT '',
-                view_count INTEGER NOT NULL DEFAULT 0
+                view_count INTEGER NOT NULL DEFAULT 0,
+                storage_state TEXT NOT NULL DEFAULT 'ACTIVE',
+                archive_storage_name TEXT NOT NULL DEFAULT '',
+                archived_at INTEGER NOT NULL DEFAULT 0,
+                owner_type TEXT NOT NULL DEFAULT 'ANONYMOUS_DEVICE',
+                owner_id TEXT NOT NULL DEFAULT '',
+                quota_group_id TEXT NOT NULL DEFAULT '',
+                created_device_id_hash TEXT NOT NULL DEFAULT '',
+                created_ip_hash TEXT NOT NULL DEFAULT ''
             )
             """;
     private static final String CREATE_INDEX = "CREATE INDEX IF NOT EXISTS idx_short_url_images_expires ON short_url_images(expires_at)";
     private static final String CREATE_CONTENT_HASH_INDEX = "CREATE INDEX IF NOT EXISTS idx_short_url_images_content_hash_expires ON short_url_images(content_hash, expires_at)";
-    private static final String SELECT_BY_CODE = "SELECT code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count FROM short_url_images WHERE code = ?";
+    private static final String SELECT_FIELDS = "code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count, storage_state, archive_storage_name, archived_at, owner_type, owner_id, quota_group_id, created_device_id_hash, created_ip_hash";
+    private static final String SELECT_BY_CODE = "SELECT " + SELECT_FIELDS + " FROM short_url_images WHERE code = ?";
     private static final String SELECT_ACTIVE_BY_CONTENT_HASH = """
-            SELECT code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count
+            SELECT %s
             FROM short_url_images
-            WHERE content_hash = ? AND expires_at > ?
+            WHERE content_hash = ? AND expires_at > ? AND storage_state = 'ACTIVE'
             ORDER BY created_at DESC
-            """;
-    private static final String INSERT = "INSERT INTO short_url_images (code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            """.formatted(SELECT_FIELDS);
+    private static final String INSERT = "INSERT INTO short_url_images (code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count, storage_state, archive_storage_name, archived_at, owner_type, owner_id, quota_group_id, created_device_id_hash, created_ip_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    private static final String UPDATE = "UPDATE short_url_images SET storage_name = ?, content_type = ?, size_bytes = ?, created_at = ?, expires_at = ?, password_hash = ?, content_hash = ?, view_count = ?, storage_state = ?, archive_storage_name = ?, archived_at = ?, owner_type = ?, owner_id = ?, quota_group_id = ?, created_device_id_hash = ?, created_ip_hash = ? WHERE code = ?";
     private static final String DELETE_BY_CODE = "DELETE FROM short_url_images WHERE code = ?";
-    private static final String SELECT_EXPIRED = "SELECT code, storage_name, content_type, size_bytes, created_at, expires_at, password_hash, content_hash, view_count FROM short_url_images WHERE expires_at <= ?";
+    private static final String SELECT_EXPIRED = "SELECT " + SELECT_FIELDS + " FROM short_url_images WHERE expires_at <= ? AND storage_state = 'ACTIVE'";
     private static final String INCREMENT_VIEW_COUNT = "UPDATE short_url_images SET view_count = view_count + 1 WHERE code = ?";
     private static final String SELECT_VIEW_COUNT = "SELECT view_count FROM short_url_images WHERE code = ?";
 
@@ -100,18 +113,21 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
     public void save(ImageShare imageShare) {
         try (Connection connection = DriverManager.getConnection(jdbcUrl);
              PreparedStatement statement = connection.prepareStatement(INSERT)) {
-            statement.setString(1, imageShare.code());
-            statement.setString(2, imageShare.storageName());
-            statement.setString(3, imageShare.contentType());
-            statement.setLong(4, imageShare.sizeBytes());
-            statement.setLong(5, imageShare.createdAt());
-            statement.setLong(6, imageShare.expiresAt());
-            statement.setString(7, imageShare.passwordHash());
-            statement.setString(8, imageShare.contentHash());
-            statement.setLong(9, imageShare.viewCount());
+            bindInsert(statement, imageShare);
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to save image share", e);
+        }
+    }
+
+    @Override
+    public void update(ImageShare imageShare) {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+             PreparedStatement statement = connection.prepareStatement(UPDATE)) {
+            bindUpdate(statement, imageShare);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to update image share", e);
         }
     }
 
@@ -144,6 +160,31 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
     }
 
     @Override
+    public List<ImageShare> findByStorageStates(Set<MediaStorageState> states) {
+        if (states == null || states.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(states.size(), "?"));
+        String sql = "SELECT " + SELECT_FIELDS + " FROM short_url_images WHERE storage_state IN (" + placeholders + ")";
+        List<ImageShare> matches = new ArrayList<>();
+        try (Connection connection = DriverManager.getConnection(jdbcUrl);
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            for (MediaStorageState state : states) {
+                statement.setString(index++, state.name());
+            }
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    matches.add(mapRow(rows));
+                }
+            }
+            return matches;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to query image shares by storage state", e);
+        }
+    }
+
+    @Override
     public long incrementViewCount(String code) {
         try (Connection connection = DriverManager.getConnection(jdbcUrl)) {
             try (PreparedStatement update = connection.prepareStatement(INCREMENT_VIEW_COUNT)) {
@@ -169,6 +210,7 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
             statement.execute(CREATE_TABLE);
             ensureContentHashColumn(connection, statement);
             ensureViewCountColumn(connection, statement);
+            ensureLifecycleColumns(connection, statement);
             statement.execute(CREATE_INDEX);
             statement.execute(CREATE_CONTENT_HASH_INDEX);
         } catch (SQLException e) {
@@ -186,8 +228,62 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
                 resultSet.getLong("expires_at"),
                 resultSet.getString("password_hash"),
                 resultSet.getString("content_hash"),
-                resultSet.getLong("view_count")
+                resultSet.getLong("view_count"),
+                parseStorageState(resultSet.getString("storage_state")),
+                resultSet.getString("archive_storage_name"),
+                resultSet.getLong("archived_at"),
+                parseOwnerType(resultSet.getString("owner_type")),
+                resultSet.getString("owner_id"),
+                resultSet.getString("quota_group_id"),
+                resultSet.getString("created_device_id_hash"),
+                resultSet.getString("created_ip_hash")
         );
+    }
+
+    private void bindInsert(PreparedStatement statement, ImageShare imageShare) throws SQLException {
+        statement.setString(1, imageShare.code());
+        bindCommon(statement, imageShare, 2);
+    }
+
+    private void bindUpdate(PreparedStatement statement, ImageShare imageShare) throws SQLException {
+        bindCommon(statement, imageShare, 1);
+        statement.setString(17, imageShare.code());
+    }
+
+    private void bindCommon(PreparedStatement statement, ImageShare imageShare, int start) throws SQLException {
+        int index = start;
+        statement.setString(index++, imageShare.storageName());
+        statement.setString(index++, imageShare.contentType());
+        statement.setLong(index++, imageShare.sizeBytes());
+        statement.setLong(index++, imageShare.createdAt());
+        statement.setLong(index++, imageShare.expiresAt());
+        statement.setString(index++, imageShare.passwordHash());
+        statement.setString(index++, imageShare.contentHash());
+        statement.setLong(index++, imageShare.viewCount());
+        statement.setString(index++, imageShare.storageState().name());
+        statement.setString(index++, imageShare.archiveStorageName());
+        statement.setLong(index++, imageShare.archivedAt());
+        statement.setString(index++, imageShare.ownerType().name());
+        statement.setString(index++, imageShare.ownerId());
+        statement.setString(index++, imageShare.quotaGroupId());
+        statement.setString(index++, imageShare.createdDeviceIdHash());
+        statement.setString(index, imageShare.createdIpHash());
+    }
+
+    private MediaStorageState parseStorageState(String value) {
+        try {
+            return MediaStorageState.valueOf(value);
+        } catch (Exception ignored) {
+            return MediaStorageState.ACTIVE;
+        }
+    }
+
+    private MediaOwnerType parseOwnerType(String value) {
+        try {
+            return MediaOwnerType.valueOf(value);
+        } catch (Exception ignored) {
+            return MediaOwnerType.ANONYMOUS_DEVICE;
+        }
     }
 
     private void ensureContentHashColumn(Connection connection, Statement statement) throws SQLException {
@@ -212,5 +308,29 @@ public final class SqliteImageShareRepository implements ImageShareRepository {
             }
         }
         statement.execute("ALTER TABLE short_url_images ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0");
+    }
+
+    private void ensureLifecycleColumns(Connection connection, Statement statement) throws SQLException {
+        ensureColumn(connection, statement, "storage_state", "TEXT NOT NULL DEFAULT 'ACTIVE'");
+        ensureColumn(connection, statement, "archive_storage_name", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(connection, statement, "archived_at", "INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(connection, statement, "owner_type", "TEXT NOT NULL DEFAULT 'ANONYMOUS_DEVICE'");
+        ensureColumn(connection, statement, "owner_id", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(connection, statement, "quota_group_id", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(connection, statement, "created_device_id_hash", "TEXT NOT NULL DEFAULT ''");
+        ensureColumn(connection, statement, "created_ip_hash", "TEXT NOT NULL DEFAULT ''");
+    }
+
+    private void ensureColumn(Connection connection, Statement statement, String name,
+                              String definition) throws SQLException {
+        try (Statement tableInfo = connection.createStatement();
+             ResultSet columns = tableInfo.executeQuery("PRAGMA table_info(short_url_images)")) {
+            while (columns.next()) {
+                if (name.equalsIgnoreCase(columns.getString("name"))) {
+                    return;
+                }
+            }
+        }
+        statement.execute("ALTER TABLE short_url_images ADD COLUMN " + name + " " + definition);
     }
 }

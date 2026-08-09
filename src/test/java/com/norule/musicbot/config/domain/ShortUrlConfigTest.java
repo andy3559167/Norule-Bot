@@ -1,9 +1,13 @@
 package com.norule.musicbot.config.domain;
 
+import com.norule.musicbot.config.BotConfig;
 import com.norule.musicbot.service.shorturl.ImageShareService;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class ShortUrlConfigTest {
     @Test
@@ -14,5 +18,56 @@ class ShortUrlConfigTest {
         assertEquals(5L * 60L * 1000L, options.maxVideoDurationMillis());
         assertEquals(20L * 1024L * 1024L, options.maxFileSizeBytes());
         assertEquals(30L * 24L * 60L * 60L * 1000L, options.expiredShareRetentionMillis());
+    }
+
+    @Test
+    void mapsPasswordIdentityAndArchiveConfiguration() {
+        BotConfig.ShortUrl parsed = BotConfig.ShortUrl.fromMap(Map.of(
+                "image", Map.of(
+                        "abuseProtection", Map.of(
+                                "passwordProtection", Map.of(
+                                        "allowDateDefaultPassword", false,
+                                        "minPasswordLength", 8,
+                                        "maxPasswordLength", 64,
+                                        "maxConcurrentVerifications", 3
+                                ),
+                                "identityContinuity", Map.of(
+                                        "anonymousToAccountMergeWindowMinutes", 90
+                                ),
+                                "storage", Map.of(
+                                        "activePath", "data/active-media",
+                                        "tempPath", "data/media-tmp",
+                                        "expiredArchivePath", "data/media-archive",
+                                        "filesystemStopPercent", 85
+                                )
+                        )
+                )
+        ), BotConfig.ShortUrl.defaultValues());
+        ShortUrlConfig config = new ShortUrlConfig(parsed);
+        ImageShareService.Options image = config.toImageShareOptions();
+
+        assertFalse(image.allowDateDefaultPassword());
+        assertEquals(8, image.minPasswordLength());
+        assertEquals(64, image.maxPasswordLength());
+        assertEquals(3, config.getPasswordProtectionOptions().maxConcurrentVerifications());
+        assertEquals(90L * 60L * 1000L, config.getIdentityContinuityOptions().mergeWindowMillis());
+        assertEquals("data/active-media", config.getImage().getStoragePath());
+        assertEquals("data/media-tmp", config.getTemporaryStoragePath());
+        assertEquals("data/media-archive", config.getExpiredArchivePath());
+        assertEquals(85, image.filesystemStopPercent());
+    }
+
+    @Test
+    void keepsLegacyImageStoragePathWhenNestedStorageUsesDefault() {
+        BotConfig.ShortUrl parsed = BotConfig.ShortUrl.fromMap(Map.of(
+                "image", Map.of(
+                        "storagePath", "data/custom-active",
+                        "abuseProtection", Map.of(
+                                "storage", Map.of("activePath", "data/short-url-images")
+                        )
+                )
+        ), BotConfig.ShortUrl.defaultValues());
+
+        assertEquals("data/custom-active", new ShortUrlConfig(parsed).getImage().getStoragePath());
     }
 }

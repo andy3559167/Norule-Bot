@@ -15,6 +15,7 @@ export interface ShortUrlResponse {
 
 export interface MediaShareConfig {
   enabled: boolean
+  accessTier: 'ANONYMOUS' | 'AUTHENTICATED' | 'API_TOKEN'
   defaultRetentionHours: number
   maxRetentionDays: number
   maxFileSizeBytes: number
@@ -23,6 +24,9 @@ export interface MediaShareConfig {
   maxVideoFileSizeMb: number
   maxVideoDurationSeconds: number
   expiredShareRetentionDays: number
+  allowDateDefaultPassword: boolean
+  minPasswordLength: number
+  maxPasswordLength: number
 }
 
 export interface MediaShareResponse {

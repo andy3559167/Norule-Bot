@@ -162,6 +162,7 @@ database:
     path: "data/norule.db"
 
 # Short URL service
+# 啟用媒體分享時必須設定環境變數 SHORT_URL_QUOTA_HMAC_SECRET 與 SHORT_URL_DEVICE_HMAC_SECRET。
 shortUrl:
   enabled: false
   bindHost: "0.0.0.0"
@@ -181,6 +182,35 @@ shortUrl:
     maxVideoDurationSeconds: 300
     expiredShareRetentionDays: 30
     storagePath: "data/short-url-images"
+    abuseProtection:
+      identityContinuity:
+        enabled: true
+        anonymousToAccountMergeWindowMinutes: 120
+        deviceLinkTtlDays: 30
+        deviceAccountSwitchCooldownHours: 24
+      passwordProtection:
+        enabled: true
+        # 保留既有 MMdd 預設密碼；設為 false 後，空白密碼會以 MEDIA_PASSWORD_REQUIRED 拒絕。
+        allowDateDefaultPassword: true
+        minPasswordLength: 4
+        maxPasswordLength: 128
+        maxFailedAttempts: 5
+        failureWindowMinutes: 10
+        lockMinutes: 10
+        backoffInitialSeconds: 1
+        backoffMultiplier: 2
+        backoffMaxSeconds: 30
+        maxConcurrentVerifications: 8
+        perIp:
+          maxVerificationRequestsPerMinute: 20
+          maxVerificationRequestsPer10Minutes: 100
+      storage:
+        activePath: "data/short-url-images"
+        tempPath: "data/tmp/uploads"
+        expiredArchivePath: "data/short-url-expired"
+        maxTotalStorageGb: 50
+        warningPercent: 70
+        filesystemStopPercent: 80
 
 # Minecraft status query settings
 minecraftStatus:

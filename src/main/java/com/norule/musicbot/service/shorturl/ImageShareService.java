@@ -2,6 +2,10 @@ package com.norule.musicbot.service.shorturl;
 
 import com.norule.musicbot.domain.shorturl.ImageShare;
 import com.norule.musicbot.domain.shorturl.ImageShareDomainService;
+import com.norule.musicbot.domain.shorturl.MediaOwnerType;
+import com.norule.musicbot.domain.shorturl.MediaStorageState;
+import com.norule.musicbot.domain.shorturl.QuotaSubject;
+import com.norule.musicbot.shorturl.InMemoryMediaSecurityRepository;
 import com.norule.musicbot.shorturl.ImageShareRepository;
 import com.norule.musicbot.shorturl.ImageShareStorage;
 import com.norule.musicbot.shorturl.ShortUrlRepository;
@@ -16,6 +20,7 @@ import java.time.LocalDate;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 public final class ImageShareService {
@@ -27,7 +32,13 @@ public final class ImageShareService {
         VIDEO_TOO_LARGE,
         VIDEO_TOO_LONG,
         RETENTION_TOO_LONG,
+        PASSWORD_REQUIRED,
         INVALID_PASSWORD,
+        UPLOAD_RATE_LIMITED,
+        DAILY_QUOTA_EXCEEDED,
+        ACTIVE_STORAGE_QUOTA_EXCEEDED,
+        GLOBAL_STORAGE_FULL,
+        FILESYSTEM_FULL,
         STORAGE_FAILED,
         PERSISTENCE_FAILED,
         CREATE_FAILED
@@ -42,7 +53,11 @@ public final class ImageShareService {
             long maxVideoDurationMillis,
             long expiredShareRetentionMillis,
             long cleanupIntervalMillis,
-            int codeLength
+            int codeLength,
+            boolean allowDateDefaultPassword,
+            int minPasswordLength,
+            int maxPasswordLength,
+            int filesystemStopPercent
     ) {
         private static final long MAX_RETENTION_MILLIS = 365L * 24L * 60L * 60L * 1000L;
         private static final long MAX_FILE_SIZE_BYTES = 20L * 1024L * 1024L;
@@ -59,6 +74,23 @@ public final class ImageShareService {
             expiredShareRetentionMillis = Math.max(1L, Math.min(MAX_RETENTION_MILLIS, expiredShareRetentionMillis));
             cleanupIntervalMillis = Math.max(60_000L, cleanupIntervalMillis);
             codeLength = Math.max(4, Math.min(32, codeLength));
+            minPasswordLength = Math.max(1, Math.min(128, minPasswordLength));
+            maxPasswordLength = Math.max(minPasswordLength, Math.min(128, maxPasswordLength));
+            filesystemStopPercent = Math.max(1, Math.min(100, filesystemStopPercent));
+        }
+
+        public Options(boolean enabled,
+                       long defaultRetentionMillis,
+                       long maxRetentionMillis,
+                       long maxFileSizeBytes,
+                       long maxVideoFileSizeBytes,
+                       long maxVideoDurationMillis,
+                       long expiredShareRetentionMillis,
+                       long cleanupIntervalMillis,
+                       int codeLength) {
+            this(enabled, defaultRetentionMillis, maxRetentionMillis, maxFileSizeBytes,
+                    maxVideoFileSizeBytes, maxVideoDurationMillis, expiredShareRetentionMillis,
+                    cleanupIntervalMillis, codeLength, true, 4, 128, 80);
         }
 
         public Options(boolean enabled,
@@ -71,7 +103,7 @@ public final class ImageShareService {
                        int codeLength) {
             this(enabled, defaultRetentionMillis, maxRetentionMillis, maxFileSizeBytes,
                     maxVideoFileSizeBytes, maxVideoDurationMillis, DEFAULT_EXPIRED_SHARE_RETENTION_MILLIS,
-                    cleanupIntervalMillis, codeLength);
+                    cleanupIntervalMillis, codeLength, true, 4, 128, 80);
         }
 
         public Options(boolean enabled,
@@ -82,7 +114,7 @@ public final class ImageShareService {
                        int codeLength) {
             this(enabled, defaultRetentionMillis, maxRetentionMillis, maxFileSizeBytes,
                     MAX_VIDEO_FILE_SIZE_BYTES, MAX_VIDEO_DURATION_MILLIS, DEFAULT_EXPIRED_SHARE_RETENTION_MILLIS,
-                    cleanupIntervalMillis, codeLength);
+                    cleanupIntervalMillis, codeLength, true, 4, 128, 80);
         }
 
         public long maxUploadSizeBytes() {
@@ -108,6 +140,10 @@ public final class ImageShareService {
         }
     }
 
+    public record SecurityDependencies(MediaPasswordAttemptGuard passwordAttemptGuard,
+                                       MediaQuotaService quotaService) {
+    }
+
     private static final char[] RANDOM_CODE_ALPHABET = "23456789abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ".toCharArray();
     private static final int PASSWORD_ITERATIONS = 120_000;
     private static final int PASSWORD_KEY_LENGTH_BITS = 256;
@@ -118,6 +154,8 @@ public final class ImageShareService {
     private final ShortUrlRepository shortUrlRepository;
     private final ImageShareStorage storage;
     private final Clock clock;
+    private final MediaPasswordAttemptGuard passwordAttemptGuard;
+    private final MediaQuotaService quotaService;
     private final AtomicReference<Options> options;
     private volatile long lastCleanupAt;
 
@@ -133,6 +171,15 @@ public final class ImageShareService {
                              ImageShareStorage storage,
                              Options options,
                              Clock clock) {
+        this(imageRepository, shortUrlRepository, storage, options, clock, null);
+    }
+
+    public ImageShareService(ImageShareRepository imageRepository,
+                             ShortUrlRepository shortUrlRepository,
+                             ImageShareStorage storage,
+                             Options options,
+                             Clock clock,
+                             SecurityDependencies securityDependencies) {
         if (imageRepository == null || shortUrlRepository == null || storage == null) {
             throw new IllegalArgumentException("image share dependencies cannot be null");
         }
@@ -143,11 +190,26 @@ public final class ImageShareService {
         this.options = new AtomicReference<>(options == null
                 ? new Options(true, 60L * 60L * 1000L, 365L * 24L * 60L * 60L * 1000L,
                 20L * 1024L * 1024L, 100L * 1024L * 1024L, 5L * 60L * 1000L,
-                30L * 24L * 60L * 60L * 1000L, 10L * 60L * 1000L, 7)
+                30L * 24L * 60L * 60L * 1000L, 10L * 60L * 1000L, 7,
+                true, 4, 128, 80)
                 : options);
+        if (securityDependencies == null) {
+            InMemoryMediaSecurityRepository securityRepository = new InMemoryMediaSecurityRepository();
+            this.passwordAttemptGuard = new MediaPasswordAttemptGuard(
+                    securityRepository, MediaPasswordAttemptGuard.Options.defaults(), "");
+            this.quotaService = new MediaQuotaService(
+                    securityRepository, new MediaQuotaService.Options(false, null, null, Long.MAX_VALUE));
+        } else {
+            this.passwordAttemptGuard = securityDependencies.passwordAttemptGuard();
+            this.quotaService = securityDependencies.quotaService();
+        }
     }
 
     public synchronized UploadResult create(Upload upload) {
+        return create(upload, null);
+    }
+
+    public synchronized UploadResult create(Upload upload, QuotaSubject quotaSubject) {
         Options currentOptions = options.get();
         if (!currentOptions.enabled()) {
             return new UploadResult(null, UploadError.DISABLED);
@@ -185,13 +247,29 @@ public final class ImageShareService {
         }
         long expiresAt = customExpiration ? upload.requestedExpiresAtMillis() : now + retention;
 
+        if (storage.filesystemUsagePercent() >= currentOptions.filesystemStopPercent()) {
+            return new UploadResult(null, UploadError.FILESYSTEM_FULL);
+        }
+        if (quotaService != null && quotaSubject != null) {
+            MediaQuotaService.Rejection rejection = quotaService.checkUpload(
+                    quotaSubject, upload.content().length, retention);
+            UploadError quotaError = mapQuotaRejection(rejection);
+            if (quotaError != null) {
+                return new UploadResult(null, quotaError);
+            }
+        }
+
         String effectivePassword = "";
         if (upload.passwordProtected()) {
             effectivePassword = domainService.normalizePassword(upload.password());
             if (effectivePassword.isBlank()) {
+                if (!currentOptions.allowDateDefaultPassword()) {
+                    return new UploadResult(null, UploadError.PASSWORD_REQUIRED);
+                }
                 effectivePassword = domainService.defaultPassword(LocalDate.now(clock));
             }
-            if (!domainService.isValidPassword(effectivePassword)) {
+            if (!domainService.isValidPassword(effectivePassword,
+                    currentOptions.minPasswordLength(), currentOptions.maxPasswordLength())) {
                 return new UploadResult(null, UploadError.INVALID_PASSWORD);
             }
         }
@@ -200,10 +278,13 @@ public final class ImageShareService {
         String contentHash = contentHash(upload.content());
         for (ImageShare existing : imageRepository.findActiveByContentHash(contentHash, now)) {
             if (!hasSameAccessAndExpiration(existing, upload.passwordProtected(), effectivePassword,
-                    customExpiration, retention, expiresAt)) {
+                    customExpiration, retention, expiresAt, quotaSubject)) {
                 continue;
             }
             if (storage.exists(existing)) {
+                if (quotaService != null && quotaSubject != null) {
+                    quotaService.recordSuccessfulUpload(quotaSubject, existing.sizeBytes());
+                }
                 return new UploadResult(existing, null);
             }
             delete(existing);
@@ -221,7 +302,16 @@ public final class ImageShareService {
                 now,
                 expiresAt,
                 passwordHash,
-                contentHash
+                contentHash,
+                0L,
+                MediaStorageState.ACTIVE,
+                "",
+                0L,
+                quotaSubject == null ? MediaOwnerType.ANONYMOUS_DEVICE : quotaSubject.ownerType(),
+                quotaSubject == null ? "" : quotaSubject.ownerId(),
+                quotaSubject == null ? "" : quotaSubject.quotaGroupId(),
+                quotaSubject == null ? "" : quotaSubject.deviceIdHash(),
+                quotaSubject == null ? "" : quotaSubject.ipHash()
         );
         try {
             storage.save(imageShare, upload.content());
@@ -231,6 +321,9 @@ public final class ImageShareService {
         }
         try {
             imageRepository.save(imageShare);
+            if (quotaService != null && quotaSubject != null) {
+                quotaService.recordSuccessfulUpload(quotaSubject, imageShare.sizeBytes());
+            }
             return new UploadResult(imageShare, null);
         } catch (RuntimeException e) {
             deleteStoredImage(imageShare);
@@ -249,8 +342,11 @@ public final class ImageShareService {
         if (imageShare == null) {
             return null;
         }
-        if (imageShare.expiresAt() <= now) {
-            retireExpiredShare(imageShare, now);
+        if (!imageShare.isPubliclyAvailable(now)) {
+            if (imageShare.storageState() == MediaStorageState.ACTIVE
+                    && imageShare.expiresAt() <= now) {
+                retireExpiredShare(imageShare, now);
+            }
             return null;
         }
         if (!storage.exists(imageShare)) {
@@ -271,11 +367,11 @@ public final class ImageShareService {
         long now = clock.millis();
         maybeCleanup(now);
         ImageShare imageShare = imageRepository.findByCode(code.trim());
-        return imageShare != null && imageShare.expiresAt() <= now ? imageShare : null;
+        return imageShare != null && !imageShare.isPubliclyAvailable(now) ? imageShare : null;
     }
 
     public InputStream open(ImageShare imageShare) {
-        if (imageShare == null || imageShare.expiresAt() <= clock.millis()) {
+        if (imageShare == null || !imageShare.isPubliclyAvailable(clock.millis())) {
             return null;
         }
         try {
@@ -292,6 +388,22 @@ public final class ImageShareService {
         }
         String normalized = domainService.normalizePassword(password);
         return !normalized.isBlank() && verifyPasswordHash(normalized, imageShare.passwordHash());
+    }
+
+    public MediaPasswordAttemptGuard.Result verifyPasswordGuarded(ImageShare imageShare, String password,
+                                                                  String clientIp) {
+        if (imageShare == null || !imageShare.isPasswordProtected()) {
+            return new MediaPasswordAttemptGuard.Result(
+                    imageShare == null ? MediaPasswordAttemptGuard.Status.INVALID_PASSWORD
+                            : MediaPasswordAttemptGuard.Status.SUCCESS, 0L);
+        }
+        if (passwordAttemptGuard == null) {
+            return verifyPassword(imageShare, password)
+                    ? new MediaPasswordAttemptGuard.Result(MediaPasswordAttemptGuard.Status.SUCCESS, 0L)
+                    : new MediaPasswordAttemptGuard.Result(MediaPasswordAttemptGuard.Status.INVALID_PASSWORD, 0L);
+        }
+        return passwordAttemptGuard.verify(clientIp, imageShare.code(),
+                () -> verifyPassword(imageShare, password));
     }
 
     public ImageShare recordView(ImageShare imageShare) {
@@ -320,8 +432,12 @@ public final class ImageShareService {
         long now = clock.millis();
         List<ImageShare> expired = imageRepository.findExpired(now);
         for (ImageShare imageShare : expired) {
-            retireExpiredShare(imageShare, now);
+            if (imageShare.storageState() == MediaStorageState.ACTIVE) {
+                retireExpiredShare(imageShare, now);
+            }
         }
+        retryPendingArchives(now);
+        reconcileArchivedMedia();
         lastCleanupAt = now;
     }
 
@@ -367,7 +483,12 @@ public final class ImageShareService {
                                                String password,
                                                boolean customExpiration,
                                                long retention,
-                                               long expiresAt) {
+                                               long expiresAt,
+                                               QuotaSubject quotaSubject) {
+        String requestedQuotaGroup = quotaSubject == null ? "" : quotaSubject.quotaGroupId();
+        if (!existing.quotaGroupId().equals(requestedQuotaGroup)) {
+            return false;
+        }
         if (existing.isPasswordProtected() != passwordProtected) {
             return false;
         }
@@ -390,8 +511,44 @@ public final class ImageShareService {
     }
 
     private void retireExpiredShare(ImageShare imageShare, long now) {
-        if (now - imageShare.expiresAt() >= options.get().expiredShareRetentionMillis()) {
-            delete(imageShare);
+        if (imageShare == null || imageShare.expiresAt() > now
+                || imageShare.storageState() == MediaStorageState.ARCHIVED
+                || imageShare.storageState() == MediaStorageState.ARCHIVE_DELETED) {
+            return;
+        }
+        ImageShare pending = imageShare.storageState() == MediaStorageState.ARCHIVE_PENDING
+                ? imageShare
+                : imageShare.withStorageState(MediaStorageState.ARCHIVE_PENDING, "", 0L);
+        if (pending != imageShare) {
+            imageRepository.update(pending);
+        }
+        archivePendingShare(pending, now);
+    }
+
+    private void retryPendingArchives(long now) {
+        for (ImageShare pending : imageRepository.findByStorageStates(
+                Set.of(MediaStorageState.ARCHIVE_PENDING))) {
+            archivePendingShare(pending, now);
+        }
+    }
+
+    private void archivePendingShare(ImageShare pending, long now) {
+        try {
+            String archiveName = storage.archive(pending);
+            imageRepository.update(pending.withStorageState(
+                    MediaStorageState.ARCHIVED, archiveName, now));
+        } catch (Exception exception) {
+            logArchiveFailure(pending, exception);
+        }
+    }
+
+    private void reconcileArchivedMedia() {
+        for (ImageShare archived : imageRepository.findByStorageStates(
+                Set.of(MediaStorageState.ARCHIVED))) {
+            if (!storage.existsArchived(archived)) {
+                imageRepository.update(archived.withStorageState(
+                        MediaStorageState.ARCHIVE_DELETED, archived.archiveStorageName(), archived.archivedAt()));
+            }
         }
     }
 
@@ -407,6 +564,39 @@ public final class ImageShareService {
         String detail = exception.getMessage();
         System.err.println("[NoRule] Failed to " + action + " short-url media: "
                 + exception.getClass().getSimpleName() + (detail == null || detail.isBlank() ? "" : " - " + detail));
+    }
+
+    private void logArchiveFailure(ImageShare imageShare, Exception exception) {
+        String detail = exception.getMessage();
+        System.err.println("[NoRule] Failed to archive expired short-url media " + imageShare.code() + ": "
+                + exception.getClass().getSimpleName()
+                + (detail == null || detail.isBlank() ? "" : " - " + detail));
+    }
+
+    private UploadError mapQuotaRejection(MediaQuotaService.Rejection rejection) {
+        if (rejection == null || rejection == MediaQuotaService.Rejection.NONE) {
+            return null;
+        }
+        return switch (rejection) {
+            case RETENTION_LIMIT -> UploadError.RETENTION_TOO_LONG;
+            case ROLLING_RATE_LIMIT -> UploadError.UPLOAD_RATE_LIMITED;
+            case DAILY_LIMIT -> UploadError.DAILY_QUOTA_EXCEEDED;
+            case ACTIVE_STORAGE_LIMIT -> UploadError.ACTIVE_STORAGE_QUOTA_EXCEEDED;
+            case GLOBAL_STORAGE_LIMIT -> UploadError.GLOBAL_STORAGE_FULL;
+            case NONE -> null;
+        };
+    }
+
+    public int maximumPasswordVerificationConcurrency() {
+        return passwordAttemptGuard == null ? 0 : passwordAttemptGuard.maximumConcurrency();
+    }
+
+    public long maxRetentionMillisFor(QuotaSubject quotaSubject) {
+        long configured = options.get().maxRetentionMillis();
+        if (quotaSubject == null || quotaService == null) {
+            return configured;
+        }
+        return Math.min(configured, quotaService.maxRetentionMillis(quotaSubject.accessTier()));
     }
 
     private String hashPassword(String password) {

@@ -26,7 +26,7 @@ const maxExpiration = computed(() => toLocalDateTimeValue(Date.now() + config.va
 const formattedExpiration = computed(() => result.value?.expiresAt ? new Intl.DateTimeFormat('zh-TW', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(result.value.expiresAt)) : '')
 
 watch(passwordProtected, (enabled) => {
-  if (enabled && !password.value.trim()) password.value = defaultPassword()
+  if (enabled && config.value.allowDateDefaultPassword && !password.value.trim()) password.value = defaultPassword()
   if (!enabled) passwordVisible.value = false
 })
 
@@ -71,8 +71,8 @@ async function submit() {
       return
     }
   }
-  if (passwordProtected.value && (password.value.length < 4 || password.value.length > 128)) {
-    localError.value = '密碼需為 4～128 個字元。'
+  if (passwordProtected.value && (password.value.length < config.value.minPasswordLength || password.value.length > config.value.maxPasswordLength)) {
+    localError.value = `密碼需為 ${config.value.minPasswordLength}～${config.value.maxPasswordLength} 個字元。`
     return
   }
   const expiresAt = customMode.value
@@ -113,7 +113,7 @@ async function submit() {
         </div>
         <NrInput v-if="customMode" v-model="customExpiration" label="自訂到期時間" type="datetime-local" :min="minExpiration" :max="maxExpiration" required :disabled="disabled || status === 'loading'" />
         <NrSwitch v-model="passwordProtected" label="密碼保護" hint="開啟後需輸入密碼才能查看" :disabled="disabled || status === 'loading'" />
-        <NrInput v-if="passwordProtected" v-model="password" label="分享密碼" :type="passwordVisible ? 'text' : 'password'" hint="預設為今天日期 MMDD，可自行修改。" autocomplete="new-password" required :disabled="disabled || status === 'loading'">
+        <NrInput v-if="passwordProtected" v-model="password" label="分享密碼" :type="passwordVisible ? 'text' : 'password'" :hint="config.allowDateDefaultPassword ? '預設為今天日期 MMDD，可自行修改。' : `請輸入 ${config.minPasswordLength}～${config.maxPasswordLength} 個字元。`" autocomplete="new-password" required :disabled="disabled || status === 'loading'">
           <template #suffix><button class="media-form-card__visibility" type="button" :aria-pressed="passwordVisible" @click="passwordVisible = !passwordVisible">{{ passwordVisible ? '隱藏' : '顯示' }}</button></template>
         </NrInput>
       </div>
