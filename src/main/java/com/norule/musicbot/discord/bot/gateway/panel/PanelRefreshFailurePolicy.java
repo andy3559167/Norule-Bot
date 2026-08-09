@@ -64,8 +64,8 @@ final class PanelRefreshFailurePolicy {
         return new PanelFailure(FailureDisposition.UNEXPECTED, "UNEXPECTED_FAILURE", null);
     }
 
-    boolean shouldLog(long guildId, long channelId, String reason, long nowMillis) {
-        PanelFailureKey key = new PanelFailureKey(guildId, channelId, reason);
+    boolean shouldLog(long guildId, long channelId, long messageId, String reason, long nowMillis) {
+        PanelFailureKey key = new PanelFailureKey(guildId, channelId, messageId, reason);
         Long previous = lastWarningByFailure.putIfAbsent(key, nowMillis);
         if (previous == null) {
             return true;
@@ -91,6 +91,6 @@ final class PanelRefreshFailurePolicy {
     record PanelFailure(FailureDisposition disposition, String reason, Permission permission) {
     }
 
-    private record PanelFailureKey(long guildId, long channelId, String reason) {
+    private record PanelFailureKey(long guildId, long channelId, long messageId, String reason) {
     }
 }

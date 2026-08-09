@@ -78,13 +78,14 @@ class PanelRefreshFailurePolicyTest {
 
     @Test
     void suppressesSameWarningForTenMinutesAndSuccessClearsIt() {
-        assertTrue(policy.shouldLog(1L, 2L, "MISSING_PERMISSION", 1_000L));
-        assertFalse(policy.shouldLog(1L, 2L, "MISSING_PERMISSION", 599_999L));
-        assertTrue(policy.shouldLog(1L, 2L, "MISSING_PERMISSION", 601_000L));
+        assertTrue(policy.shouldLog(1L, 2L, 100L, "MISSING_PERMISSION", 1_000L));
+        assertFalse(policy.shouldLog(1L, 2L, 100L, "MISSING_PERMISSION", 599_999L));
+        assertTrue(policy.shouldLog(1L, 2L, 100L, "MISSING_PERMISSION", 601_000L));
+        assertTrue(policy.shouldLog(1L, 2L, 200L, "MISSING_PERMISSION", 601_000L));
 
         policy.clearChannel(1L, 2L);
 
-        assertTrue(policy.shouldLog(1L, 2L, "MISSING_PERMISSION", 601_001L));
+        assertTrue(policy.shouldLog(1L, 2L, 100L, "MISSING_PERMISSION", 601_001L));
     }
 
     private ErrorResponseException discordError(ErrorResponse error, int status) {

@@ -35,6 +35,9 @@ public final class AudioLoadFailureClassifier {
         if (failure == null) {
             return Category.UNKNOWN;
         }
+        if (containsYoutubeAggregateFailure(failure)) {
+            return Category.UNKNOWN;
+        }
         if (isSpotifyGeneratedPlaylistUnavailable(failure)) {
             return Category.SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE;
         }
@@ -63,6 +66,15 @@ public final class AudioLoadFailureClassifier {
             current = current.getCause();
         }
         return messageCategory;
+    }
+
+    private boolean containsYoutubeAggregateFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if ("dev.lavalink.youtube.AllClientsFailedException".equals(current.getClass().getName())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public boolean isRecoverable(Throwable failure) {

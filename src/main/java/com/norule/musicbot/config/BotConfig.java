@@ -1710,6 +1710,7 @@ public String getToken() {
             private final String cipherServer;
             private final String cipherPassword;
             private final String cipherUserAgent;
+            private final Auth auth;
             private final StrictPrecheck strictPrecheck;
 
             private Youtube(boolean oauthEnabled,
@@ -1718,6 +1719,7 @@ public String getToken() {
                             String cipherServer,
                             String cipherPassword,
                             String cipherUserAgent,
+                            Auth auth,
                             StrictPrecheck strictPrecheck) {
                 this.oauthEnabled = oauthEnabled;
                 this.cipherEnabled = cipherEnabled;
@@ -1725,24 +1727,28 @@ public String getToken() {
                 this.cipherServer = nullToEmpty(cipherServer);
                 this.cipherPassword = nullToEmpty(cipherPassword);
                 this.cipherUserAgent = nullToEmpty(cipherUserAgent);
+                this.auth = auth == null ? Auth.defaultValues() : auth;
                 this.strictPrecheck = strictPrecheck == null ? StrictPrecheck.defaultValues() : strictPrecheck;
             }
 
             public static Youtube fromMap(Map<String, Object> map, Youtube fallback) {
                 Youtube defaults = fallback == null ? defaultValues() : fallback;
+                boolean oauthEnabled = getBoolean(map, "oauthEnabled", defaults.isOauthEnabled());
+                String oauthRefreshToken = getString(map, "oauthRefreshToken", defaults.getOauthRefreshToken());
                 return new Youtube(
-                        getBoolean(map, "oauthEnabled", defaults.isOauthEnabled()),
+                        oauthEnabled,
                         getBoolean(map, "cipherEnabled", defaults.isCipherEnabled()),
-                        getString(map, "oauthRefreshToken", defaults.getOauthRefreshToken()),
+                        oauthRefreshToken,
                         getString(map, "cipherServer", defaults.getCipherServer()),
                         getString(map, "cipherPassword", defaults.getCipherPassword()),
                         getString(map, "cipherUserAgent", defaults.getCipherUserAgent()),
+                        Auth.fromMap(asMap(map.get("auth")), defaults.getAuth(), oauthEnabled, oauthRefreshToken),
                         StrictPrecheck.fromMap(asMap(map.get("strictPrecheck")), defaults.getStrictPrecheck())
                 );
             }
 
             public static Youtube defaultValues() {
-                return new Youtube(false, false, "", "", "", "", StrictPrecheck.defaultValues());
+                return new Youtube(false, false, "", "", "", "", Auth.defaultValues(), StrictPrecheck.defaultValues());
             }
 
             public boolean isOauthEnabled() {
@@ -1769,24 +1775,95 @@ public String getToken() {
                 return cipherUserAgent;
             }
 
+            public Auth getAuth() {
+                return auth;
+            }
+
             public StrictPrecheck getStrictPrecheck() {
                 return strictPrecheck;
+            }
+
+            public static class Auth {
+                private final String mode;
+                private final boolean strictAuthConfig;
+                private final String poToken;
+                private final String visitorData;
+                private final String oauthRefreshToken;
+
+                private Auth(String mode,
+                             boolean strictAuthConfig,
+                             String poToken,
+                             String visitorData,
+                             String oauthRefreshToken) {
+                    this.mode = normalizeMode(mode);
+                    this.strictAuthConfig = strictAuthConfig;
+                    this.poToken = nullToEmpty(poToken);
+                    this.visitorData = nullToEmpty(visitorData);
+                    this.oauthRefreshToken = nullToEmpty(oauthRefreshToken);
+                }
+
+                static Auth fromMap(Map<String, Object> map,
+                                    Auth fallback,
+                                    boolean legacyOauthEnabled,
+                                    String legacyOauthRefreshToken) {
+                    Auth defaults = fallback == null ? defaultValues() : fallback;
+                    String legacyMode = legacyOauthEnabled || !nullToEmpty(legacyOauthRefreshToken).isBlank()
+                            ? "OAUTH"
+                            : defaults.getMode();
+                    String mode = map == null || map.isEmpty()
+                            ? legacyMode
+                            : getString(map, "mode", defaults.getMode());
+                    return new Auth(
+                            mode,
+                            getBoolean(map, "strictAuthConfig", defaults.isStrictAuthConfig()),
+                            getString(map, "poToken", defaults.getPoToken()),
+                            getString(map, "visitorData", defaults.getVisitorData()),
+                            getString(map, "oauthRefreshToken",
+                                    nullToEmpty(legacyOauthRefreshToken).isBlank()
+                                            ? defaults.getOauthRefreshToken()
+                                            : legacyOauthRefreshToken)
+                    );
+                }
+
+                static Auth defaultValues() {
+                    return new Auth("NONE", false, "", "", "");
+                }
+
+                public String getMode() { return mode; }
+                public boolean isStrictAuthConfig() { return strictAuthConfig; }
+                public String getPoToken() { return poToken; }
+                public String getVisitorData() { return visitorData; }
+                public String getOauthRefreshToken() { return oauthRefreshToken; }
+
+                private static String normalizeMode(String mode) {
+                    String normalized = nullToEmpty(mode).trim().toUpperCase(Locale.ROOT);
+                    return "POT".equals(normalized) || "OAUTH".equals(normalized) ? normalized : "NONE";
+                }
             }
 
             public static class StrictPrecheck {
                 private final boolean enabled;
                 private final int cacheTtlHours;
+                private final int playableTtlHours;
+                private final int temporaryFailureTtlMinutes;
+                private final int permanentFailureTtlHours;
                 private final int timeoutMillis;
                 private final String lavalinkBaseUrl;
                 private final String lavalinkPassword;
 
                 private StrictPrecheck(boolean enabled,
                                        int cacheTtlHours,
+                                       int playableTtlHours,
+                                       int temporaryFailureTtlMinutes,
+                                       int permanentFailureTtlHours,
                                        int timeoutMillis,
                                        String lavalinkBaseUrl,
                                        String lavalinkPassword) {
                     this.enabled = enabled;
                     this.cacheTtlHours = Math.max(1, cacheTtlHours);
+                    this.playableTtlHours = Math.max(1, playableTtlHours);
+                    this.temporaryFailureTtlMinutes = Math.max(1, temporaryFailureTtlMinutes);
+                    this.permanentFailureTtlHours = Math.max(1, permanentFailureTtlHours);
                     this.timeoutMillis = Math.max(1, timeoutMillis);
                     this.lavalinkBaseUrl = nullToEmpty(lavalinkBaseUrl);
                     this.lavalinkPassword = nullToEmpty(lavalinkPassword);
@@ -1794,11 +1871,19 @@ public String getToken() {
 
                 public static StrictPrecheck fromMap(Map<String, Object> map, StrictPrecheck fallback) {
                     StrictPrecheck defaults = fallback == null ? defaultValues() : fallback;
+                    Map<String, Object> cache = asMap(map.get("cache"));
+                    int legacyCacheTtlHours = getInt(map, "cacheTtlHours", defaults.getCacheTtlHours());
                     String baseUrl = getString(map, "lavalinkBaseUrl", getString(map, "baseUrl", defaults.getLavalinkBaseUrl()));
                     String password = getString(map, "lavalinkPassword", getString(map, "password", defaults.getLavalinkPassword()));
                     return new StrictPrecheck(
                             getBoolean(map, "enabled", defaults.isEnabled()),
-                            getInt(map, "cacheTtlHours", defaults.getCacheTtlHours()),
+                            legacyCacheTtlHours,
+                            getInt(cache, "playableTtlHours",
+                                    getInt(map, "playableTtlHours", legacyCacheTtlHours)),
+                            getInt(cache, "temporaryFailureTtlMinutes",
+                                    getInt(map, "temporaryFailureTtlMinutes", defaults.getTemporaryFailureTtlMinutes())),
+                            getInt(cache, "permanentFailureTtlHours",
+                                    getInt(map, "permanentFailureTtlHours", legacyCacheTtlHours)),
                             getInt(map, "timeoutMillis", defaults.getTimeoutMillis()),
                             baseUrl,
                             password
@@ -1806,7 +1891,7 @@ public String getToken() {
                 }
 
                 public static StrictPrecheck defaultValues() {
-                    return new StrictPrecheck(false, 24, 5000, "", "");
+                    return new StrictPrecheck(false, 24, 24, 10, 24, 5000, "", "");
                 }
 
                 public boolean isEnabled() {
@@ -1816,6 +1901,10 @@ public String getToken() {
                 public int getCacheTtlHours() {
                     return cacheTtlHours;
                 }
+
+                public int getPlayableTtlHours() { return playableTtlHours; }
+                public int getTemporaryFailureTtlMinutes() { return temporaryFailureTtlMinutes; }
+                public int getPermanentFailureTtlHours() { return permanentFailureTtlHours; }
 
                 public int getTimeoutMillis() {
                     return timeoutMillis;

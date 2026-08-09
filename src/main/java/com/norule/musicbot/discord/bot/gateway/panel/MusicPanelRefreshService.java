@@ -42,7 +42,8 @@ public final class MusicPanelRefreshService {
     public void createPanelMessageWithFeedback(Guild guild, TextChannel channel, String lang, Runnable onSuccess, Consumer<String> onError) {
         Permission missingPermission = missingRefreshPermission(guild, channel);
         if (missingPermission != null) {
-            logOperationalFailure(guild.getIdLong(), channel.getIdLong(), "MISSING_PERMISSION", missingPermission);
+            logOperationalFailure(guild.getIdLong(), channel.getIdLong(), 0L,
+                    "MISSING_PERMISSION", missingPermission);
             String missing = owner.formatMissingPermissionsForPanel(guild.getSelfMember(), channel,
                     Permission.VIEW_CHANNEL, Permission.MESSAGE_SEND, Permission.MESSAGE_EMBED_LINKS);
             onError.accept(owner.i18nService().t(lang, "general.missing_permissions", java.util.Map.of("permissions", missing)));
@@ -94,7 +95,8 @@ public final class MusicPanelRefreshService {
         }
         Permission missingPermission = missingRefreshPermission(guild, channel);
         if (missingPermission != null) {
-            logOperationalFailure(guildId, channel.getIdLong(), "MISSING_PERMISSION", missingPermission);
+            logOperationalFailure(guildId, channel.getIdLong(), messageId,
+                    "MISSING_PERMISSION", missingPermission);
             return;
         }
         long now = System.currentTimeMillis();
@@ -135,7 +137,7 @@ public final class MusicPanelRefreshService {
         try {
             Guild guild = currentJda.getGuildById(guildId);
             if (guild == null) {
-                stateStore.clearPanelState(guildId);
+                stateStore.compareAndClearPanelState(guildId, ref.channelId, ref.messageId);
                 return;
             }
             if (!force) {
@@ -156,13 +158,14 @@ public final class MusicPanelRefreshService {
             }
             TextChannel channel = guild.getTextChannelById(ref.channelId);
             if (channel == null) {
-                logOperationalFailure(guildId, ref.channelId, "UNKNOWN_CHANNEL", null);
-                stateStore.clearPanelState(guildId);
+                logOperationalFailure(guildId, ref.channelId, ref.messageId, "UNKNOWN_CHANNEL", null);
+                stateStore.compareAndClearPanelState(guildId, ref.channelId, ref.messageId);
                 return;
             }
             Permission missingPermission = missingRefreshPermission(guild, channel);
             if (missingPermission != null) {
-                logOperationalFailure(guildId, channel.getIdLong(), "MISSING_PERMISSION", missingPermission);
+                logOperationalFailure(guildId, channel.getIdLong(), ref.messageId,
+                        "MISSING_PERMISSION", missingPermission);
                 return;
             }
             String signature = owner.panelSignature(guild);
@@ -238,36 +241,37 @@ public final class MusicPanelRefreshService {
             return;
         }
 
-        logOperationalFailure(guildId, channelId, classified.reason(), classified.permission());
+        logOperationalFailure(guildId, channelId, messageId, classified.reason(), classified.permission());
         if (clearStaleState
                 && classified.disposition() == PanelRefreshFailurePolicy.FailureDisposition.CLEAR_STATE) {
-            MusicPanelStateStore.PanelRef active = stateStore.getPanelRef(guildId);
-            if (active != null
-                    && active.channelId == channelId
-                    && (messageId == 0L || active.messageId == messageId)) {
-                stateStore.clearPanelState(guildId);
-            }
+            stateStore.compareAndClearPanelState(guildId, channelId, messageId);
         }
     }
 
-    private void logOperationalFailure(long guildId, long channelId, String reason, Permission permission) {
-        if (!failurePolicy.shouldLog(guildId, channelId, reason, System.currentTimeMillis())) {
+    private void logOperationalFailure(long guildId,
+                                       long channelId,
+                                       long messageId,
+                                       String reason,
+                                       Permission permission) {
+        if (!failurePolicy.shouldLog(guildId, channelId, messageId, reason, System.currentTimeMillis())) {
             return;
         }
         if (permission != null) {
             LOGGER.warn(
-                    "[NoRule] Music panel refresh skipped: guildId={} channelId={} reason={} permission={}",
+                    "[NoRule] Music panel refresh skipped: guildId={} channelId={} messageId={} reason={} permission={}",
                     guildId,
                     channelId,
+                    messageId,
                     reason,
                     permission
             );
             return;
         }
         LOGGER.warn(
-                "[NoRule] Music panel refresh skipped: guildId={} channelId={} reason={}",
+                "[NoRule] Music panel refresh skipped: guildId={} channelId={} messageId={} reason={}",
                 guildId,
                 channelId,
+                messageId,
                 reason
         );
     }

@@ -1,6 +1,7 @@
 package com.norule.musicbot.domain.music;
 
 import com.sedmelluq.discord.lavaplayer.player.AudioPlayer;
+import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrackEndReason;
 import org.junit.jupiter.api.Test;
@@ -53,6 +54,32 @@ class TrackSchedulerRecoveryTest {
         assertSame(queued.proxy, player.current);
         assertFalse(scheduler.replaceIfCurrent(old.proxy, replacement.proxy, generation, 10_000L));
         assertSame(queued.proxy, player.current);
+    }
+
+    @Test
+    void exceptionSkipAndLoadFailedEndEventAdvanceOnlyOnce() {
+        FakePlayer player = new FakePlayer();
+        TrackScheduler scheduler = new TrackScheduler(player.proxy);
+        FakeTrack failed = new FakeTrack("failed", true);
+        FakeTrack next = new FakeTrack("next", true);
+        FakeTrack afterNext = new FakeTrack("after-next", true);
+
+        scheduler.queue(failed.proxy);
+        scheduler.queue(next.proxy);
+        scheduler.queue(afterNext.proxy);
+        scheduler.setTrackExceptionListener((track, exception) ->
+                scheduler.skipIfCurrent(track, scheduler.getPlaybackGeneration()));
+
+        scheduler.onTrackException(
+                player.proxy,
+                failed.proxy,
+                new FriendlyException("playback failed", FriendlyException.Severity.SUSPICIOUS, null)
+        );
+        scheduler.onTrackEnd(player.proxy, failed.proxy, AudioTrackEndReason.LOAD_FAILED);
+
+        assertSame(next.proxy, player.current);
+        assertEquals(1, scheduler.snapshotQueue().size());
+        assertSame(afterNext.proxy, scheduler.snapshotQueue().get(0));
     }
 
     private static final class FakePlayer {

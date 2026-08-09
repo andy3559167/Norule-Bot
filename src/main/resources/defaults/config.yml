@@ -66,6 +66,13 @@ developers:
 # Global music integrations
 music:
   youtube:
+    auth:
+      mode: NONE
+      strictAuthConfig: false
+      poToken: ""
+      visitorData: ""
+      oauthRefreshToken: ""
+    # Legacy OAuth keys remain supported for existing installations.
     oauthEnabled: false
     oauthRefreshToken: ""
     cipherEnabled: false
@@ -77,6 +84,10 @@ music:
     strictPrecheck:
       enabled: false
       cacheTtlHours: 24
+      cache:
+        playableTtlHours: 24
+        temporaryFailureTtlMinutes: 10
+        permanentFailureTtlHours: 24
       timeoutMillis: 5000
       lavalinkBaseUrl: ""
       lavalinkPassword: ""

@@ -85,6 +85,24 @@ public final class MusicPlaybackText {
         if ("YOUTUBE_PRECHECK_UNKNOWN".equalsIgnoreCase(rawError)) {
             return i18n().t(lang, "music.youtube_precheck_unknown");
         }
+        if (rawError != null && rawError.regionMatches(true, 0, "YOUTUBE_", 0, "YOUTUBE_".length())) {
+            return i18n().t(lang, switch (rawError.toUpperCase()) {
+                case "YOUTUBE_BOT_DETECTED" -> "music.youtube_bot_detected";
+                case "YOUTUBE_LOGIN_REQUIRED" -> "music.youtube_login_required";
+                case "YOUTUBE_NO_SUPPORTED_AUDIO_STREAM" -> "music.youtube_no_supported_audio_stream";
+                case "YOUTUBE_PLAYER_CONFIGURATION_ERROR" -> "music.youtube_player_configuration_error";
+                case "YOUTUBE_VIDEO_UNAVAILABLE" -> "music.youtube_unavailable";
+                case "YOUTUBE_VIDEO_PRIVATE" -> "music.youtube_private_video";
+                case "YOUTUBE_VIDEO_AGE_RESTRICTED" -> "music.youtube_age_restricted";
+                case "YOUTUBE_REGION_RESTRICTED" -> "music.youtube_region_restricted";
+                case "YOUTUBE_DECODER_FAILURE" -> "music.youtube_decoder_failure";
+                case "YOUTUBE_HTTP_FORBIDDEN" -> "music.youtube_http_forbidden";
+                case "YOUTUBE_HTTP_BAD_REQUEST", "YOUTUBE_SIGNATURE_FAILURE", "YOUTUBE_CIPHER_FAILURE",
+                        "YOUTUBE_NETWORK_TIMEOUT", "YOUTUBE_NETWORK_IO", "YOUTUBE_ALL_CLIENTS_FAILED",
+                        "YOUTUBE_UNKNOWN" -> "music.youtube_source_temporary_failure";
+                default -> "music.load_failed_generic";
+            });
+        }
         if (rawError != null && rawError.regionMatches(true, 0, "AUDIO_", 0, "AUDIO_".length())) {
             return i18n().t(lang, switch (rawError.toUpperCase()) {
                 case "AUDIO_INVALID_INPUT" -> "music.audio_invalid_input";

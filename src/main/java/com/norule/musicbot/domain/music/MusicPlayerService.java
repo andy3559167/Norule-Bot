@@ -51,10 +51,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.LongAdder;
 import java.util.stream.Collectors;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -85,6 +87,7 @@ public class MusicPlayerService {
     private static final String TRACK_RECOVERY_EXHAUSTED_ERROR_KEY = "AUDIO_TRACK_RECOVERY_EXHAUSTED";
     private static final String TRACK_RECOVERY_FAILED_ERROR_KEY = "AUDIO_TRACK_RECOVERY_FAILED";
     private static final AudioLoadFailureClassifier FAILURE_CLASSIFIER = new AudioLoadFailureClassifier();
+    private static final YoutubeFailureClassifier YOUTUBE_FAILURE_CLASSIFIER = new YoutubeFailureClassifier();
     private static final Pattern SPOTIFY_URL_START_PATTERN = Pattern.compile(
             "(?i)https?://(?:www\\.)?open\\.spotify\\.com/"
     );
@@ -106,6 +109,9 @@ public class MusicPlayerService {
     private final SpotifyPlaylistInspector spotifyPlaylistInspector;
     private final AudioInputClassifier inputClassifier = new AudioInputClassifier();
     private final TrackRecoveryService trackRecoveryService;
+    private final MusicConfig.Youtube.AuthMode effectiveYoutubeAuthMode;
+    private final Map<YoutubeFailureCategory, LongAdder> youtubePlaybackFailureCounters =
+            createYoutubeFailureCounters();
     private final Map<Long, GuildMusicManager> musicManagers = new ConcurrentHashMap<>();
     private final Map<Long, Runnable> guildStateListeners = new ConcurrentHashMap<>();
     private final Map<Long, Long> lastCommandChannelByGuild = new ConcurrentHashMap<>();
@@ -190,9 +196,10 @@ public class MusicPlayerService {
         );
         playerManager = new DefaultAudioPlayerManager();
         playerManager.setTrackStuckThreshold(recoveryConfig.getStuckThresholdMillis());
-        configureYouTubePoToken();
-        YoutubeAudioSourceManager youtubeSourceManager = createYoutubeSourceManager();
-        configureYouTubeOauth(youtubeSourceManager);
+        YoutubeAuthRuntime youtubeAuth = configureYouTubePoToken(resolveYoutubeAuthentication());
+        YoutubeAudioSourceManager youtubeSourceManager = createYoutubeSourceManager(youtubeAuth.mode());
+        youtubeAuth = configureYouTubeOauth(youtubeSourceManager, youtubeAuth);
+        this.effectiveYoutubeAuthMode = youtubeAuth.mode();
         playerManager.registerSourceManager(youtubeSourceManager);
         this.spotifySourceEnabled = registerSpotifySourceIfConfigured();
         AudioSourceManagers.registerLocalSource(playerManager);
@@ -432,10 +439,10 @@ public class MusicPlayerService {
         }
     }
 
-    private YoutubeAudioSourceManager createYoutubeSourceManager() {
+    private YoutubeAudioSourceManager createYoutubeSourceManager(MusicConfig.Youtube.AuthMode authMode) {
         List<dev.lavalink.youtube.clients.skeleton.Client> clients = new ArrayList<>();
         clients.add(new MusicWithThumbnail());
-        if (isYouTubeOauthConfigured()) {
+        if (authMode == MusicConfig.Youtube.AuthMode.OAUTH) {
             clients.add(new Tv());
         }
         clients.add(new WebWithThumbnail());
@@ -470,7 +477,7 @@ public class MusicPlayerService {
         );
         YoutubeSourceOptions options = new YoutubeSourceOptions()
                 .setRemoteCipher(remoteCipherUrl, remoteCipherPassword, remoteCipherUserAgent);
-        System.out.println("[NoRule] YouTube remote cipher server configured: " + remoteCipherUrl);
+        LOGGER.info("[NoRule] YouTube remote cipher server configured.");
         return new YoutubeAudioSourceManager(options, clientArray);
     }
 
@@ -478,72 +485,116 @@ public class MusicPlayerService {
         return getBooleanEnvOverride("YOUTUBE_CIPHER_ENABLED", youtubeConfig.isCipherEnabled());
     }
 
-    private void configureYouTubePoToken() {
-        String poToken = firstNonBlank(System.getenv("YOUTUBE_POTOKEN"), System.getenv("YOUTUBE_PO_TOKEN"));
-        String visitorData = firstNonBlank(System.getenv("YOUTUBE_VISITOR_DATA"), System.getenv("YOUTUBE_VISITORDATA"));
-        if (poToken == null || visitorData == null) {
-            return;
-        }
-        Web.setPoTokenAndVisitorData(poToken, visitorData);
-        System.out.println("[NoRule] YouTube poToken configured for WEB clients.");
-    }
-
-    private void configureYouTubeOauth(YoutubeAudioSourceManager youtubeSourceManager) {
-        String refreshToken = getYouTubeOauthRefreshToken();
-        if (refreshToken != null) {
-            youtubeSourceManager.useOauth2(refreshToken, true);
-            System.out.println("[NoRule] YouTube OAuth refresh token configured.");
-            return;
-        }
-        if (isYouTubeOauthInitializationEnabled()) {
-            youtubeSourceManager.useOauth2(null, false);
-            System.out.println("[NoRule] YouTube OAuth initialization enabled. Follow the youtube-source login prompt and persist the refresh token.");
-            watchYouTubeOauthRefreshToken(youtubeSourceManager);
-        }
-    }
-
-    private boolean isYouTubeOauthConfigured() {
-        return getYouTubeOauthRefreshToken() != null || isYouTubeOauthInitializationEnabled();
-    }
-
-    private String getYouTubeOauthRefreshToken() {
-        return firstNonBlank(
+    private YoutubeAuthRuntime resolveYoutubeAuthentication() {
+        MusicConfig.Youtube.Auth auth = youtubeConfig.getAuth();
+        String configuredMode = firstNonBlank(System.getenv("YOUTUBE_AUTH_MODE"));
+        MusicConfig.Youtube.AuthMode mode = configuredMode == null
+                ? auth.getMode()
+                : parseYoutubeAuthMode(configuredMode);
+        boolean strict = getBooleanEnvOverride("YOUTUBE_STRICT_AUTH_CONFIG", auth.isStrictAuthConfig());
+        String poToken = firstNonBlank(
+                System.getenv("YOUTUBE_PO_TOKEN"),
+                System.getenv("YOUTUBE_POTOKEN"),
+                auth.getPoToken()
+        );
+        String visitorData = firstNonBlank(
+                System.getenv("YOUTUBE_VISITOR_DATA"),
+                System.getenv("YOUTUBE_VISITORDATA"),
+                auth.getVisitorData()
+        );
+        String oauthRefreshToken = firstNonBlank(
                 System.getenv("YOUTUBE_OAUTH_REFRESH_TOKEN"),
                 System.getenv("YOUTUBE_REFRESH_TOKEN"),
+                auth.getOauthRefreshToken(),
                 youtubeConfig.getOauthRefreshToken()
         );
-    }
-
-    private boolean isYouTubeOauthInitializationEnabled() {
-        String envValue = firstNonBlank(System.getenv("YOUTUBE_OAUTH"));
-        if (envValue != null) {
-            return isTruthy(envValue);
+        if (mode == MusicConfig.Youtube.AuthMode.POT && (poToken == null || visitorData == null)) {
+            return invalidYoutubeAuthentication(
+                    strict,
+                    "YouTube POT authentication disabled: required credentials are missing."
+            );
         }
-        return youtubeConfig.isOauthEnabled();
+        if (mode == MusicConfig.Youtube.AuthMode.OAUTH && oauthRefreshToken == null) {
+            return invalidYoutubeAuthentication(
+                    strict,
+                    "YouTube OAuth authentication disabled: refresh token is missing."
+            );
+        }
+        YoutubeAuthRuntime runtime = new YoutubeAuthRuntime(mode, strict, poToken, visitorData, oauthRefreshToken);
+        logYoutubeAuthentication(runtime);
+        return runtime;
     }
 
-    private void watchYouTubeOauthRefreshToken(YoutubeAudioSourceManager youtubeSourceManager) {
-        Thread watcher = new Thread(() -> {
-            String lastPrinted = "";
-            long deadline = System.currentTimeMillis() + Duration.ofMinutes(10).toMillis();
-            while (System.currentTimeMillis() < deadline) {
-                String token = youtubeSourceManager.getOauth2RefreshToken();
-                if (token != null && !token.isBlank() && !token.equals(lastPrinted)) {
-                    System.out.println("[NoRule] Set YOUTUBE_OAUTH_REFRESH_TOKEN=" + token + " for future starts.");
-                    lastPrinted = token;
-                    return;
-                }
-                try {
-                    Thread.sleep(3000L);
-                } catch (InterruptedException ex) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
+    private YoutubeAuthRuntime configureYouTubePoToken(YoutubeAuthRuntime auth) {
+        if (auth.mode() != MusicConfig.Youtube.AuthMode.POT) {
+            return auth;
+        }
+        try {
+            Web.setPoTokenAndVisitorData(auth.poToken(), auth.visitorData());
+            return auth;
+        } catch (RuntimeException failure) {
+            if (auth.strict()) {
+                throw new IllegalStateException("YouTube POT authentication initialization failed.", failure);
             }
-            System.out.println("[NoRule] YouTube OAuth refresh token was not received within 10 minutes.");
-        }, "youtube-oauth-token-watcher");
-        watcher.setDaemon(true);
-        watcher.start();
+            LOGGER.warn("[NoRule] YouTube POT authentication disabled: initialization failed.");
+            LOGGER.debug("YouTube POT initialization failure", failure);
+            YoutubeAuthRuntime fallback = YoutubeAuthRuntime.none(false);
+            logYoutubeAuthentication(fallback);
+            return fallback;
+        }
+    }
+
+    private YoutubeAuthRuntime configureYouTubeOauth(YoutubeAudioSourceManager youtubeSourceManager,
+                                                     YoutubeAuthRuntime auth) {
+        if (auth.mode() != MusicConfig.Youtube.AuthMode.OAUTH) {
+            return auth;
+        }
+        try {
+            youtubeSourceManager.useOauth2(auth.oauthRefreshToken(), true);
+            return auth;
+        } catch (RuntimeException failure) {
+            if (auth.strict()) {
+                throw new IllegalStateException("YouTube OAuth authentication initialization failed.", failure);
+            }
+            LOGGER.warn("[NoRule] YouTube OAuth authentication disabled: initialization failed.");
+            LOGGER.debug("YouTube OAuth initialization failure", failure);
+            YoutubeAuthRuntime fallback = YoutubeAuthRuntime.none(false);
+            logYoutubeAuthentication(fallback);
+            return fallback;
+        }
+    }
+
+    private YoutubeAuthRuntime invalidYoutubeAuthentication(boolean strict, String message) {
+        if (strict) {
+            throw new IllegalStateException(message);
+        }
+        LOGGER.warn("[NoRule] {}", message);
+        YoutubeAuthRuntime fallback = YoutubeAuthRuntime.none(false);
+        logYoutubeAuthentication(fallback);
+        return fallback;
+    }
+
+    private MusicConfig.Youtube.AuthMode parseYoutubeAuthMode(String value) {
+        if (value == null || value.isBlank()) {
+            return MusicConfig.Youtube.AuthMode.NONE;
+        }
+        try {
+            return MusicConfig.Youtube.AuthMode.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException failure) {
+            LOGGER.warn("[NoRule] Invalid YouTube authentication mode; falling back to NONE.");
+            return MusicConfig.Youtube.AuthMode.NONE;
+        }
+    }
+
+    private void logYoutubeAuthentication(YoutubeAuthRuntime auth) {
+        LOGGER.info(
+                "[NoRule] YouTube authentication: mode={} tokenConfigured={} visitorDataConfigured={}",
+                auth.mode(),
+                auth.mode() == MusicConfig.Youtube.AuthMode.POT
+                        ? auth.poToken() != null
+                        : auth.oauthRefreshToken() != null,
+                auth.visitorData() != null
+        );
     }
 
     private String firstNonBlank(String... values) {
@@ -702,7 +753,9 @@ public class MusicPlayerService {
 
             @Override
             public void loadFailed(FriendlyException exception) {
-                onError.accept(exception.getMessage());
+                YoutubeFailureReport youtubeFailure = YOUTUBE_FAILURE_CLASSIFIER.classify(exception);
+                logYoutubeFailure("search-load", 0L, null, "-", youtubeFailure, exception);
+                onError.accept(youtubeFailure.errorKey());
             }
         });
     }
@@ -799,15 +852,13 @@ public class MusicPlayerService {
             List<AudioTrack> cachedTracks = getCachedYoutubePlaylistTracks(userInput);
             if (!cachedTracks.isEmpty()) {
                 List<AudioTrack> limited = cachedTracks.stream().limit(playlistTrackLimit).toList();
-                enqueuePlaylistTracksBatched(guildMusicManager, limited, sourceLabel, requesterId, requesterName, userInput, identifier);
-                messageSender.accept(limited.get(0).getInfo().title);
+                AudioTrack firstQueued = enqueuePlaylistTracksBatched(
+                        guildMusicManager, limited, sourceLabel, requesterId, requesterName, userInput, identifier);
+                messageSender.accept(firstQueued == null
+                        ? "LOAD_FAILED:" + YOUTUBE_PRECHECK_BLOCKED_ERROR_KEY
+                        : firstQueued.getInfo().title);
                 return;
             }
-        }
-        YouTubePlaybackPrecheckResult directPrecheck = youtubePrecheckService.check(identifier);
-        if (!directPrecheck.allowsQueue()) {
-            messageSender.accept("LOAD_FAILED:" + mapYouTubePrecheckFailure(directPrecheck));
-            return;
         }
         playerManager.loadItemOrdered(guildMusicManager, identifier, new AudioLoadResultHandler() {
             @Override
@@ -847,8 +898,18 @@ public class MusicPlayerService {
                             .map(AudioTrack::makeClone)
                             .toList();
                     cacheYoutubePlaylistTracks(userInput, tracksToQueue);
-                    enqueuePlaylistTracksBatched(guildMusicManager, tracksToQueue, sourceLabel, requesterId, requesterName, userInput, identifier);
-                    messageSender.accept(playlist.getTracks().get(0).getInfo().title);
+                    AudioTrack firstQueued = enqueuePlaylistTracksBatched(
+                            guildMusicManager,
+                            tracksToQueue,
+                            sourceLabel,
+                            requesterId,
+                            requesterName,
+                            userInput,
+                            identifier
+                    );
+                    messageSender.accept(firstQueued == null
+                            ? "LOAD_FAILED:" + YOUTUBE_PRECHECK_BLOCKED_ERROR_KEY
+                            : firstQueued.getInfo().title);
                     return;
                 }
                 AudioTrack firstTrack = playlist.getSelectedTrack() != null
@@ -871,6 +932,19 @@ public class MusicPlayerService {
 
             @Override
             public void loadFailed(FriendlyException exception) {
+                if (isYoutubeLoadAttempt(userInput, identifier, sourceLabel, exception)) {
+                    YoutubeFailureReport youtubeFailure = YOUTUBE_FAILURE_CLASSIFIER.classify(exception);
+                    logYoutubeFailure(
+                            "load",
+                            guildId,
+                            extractYouTubeVideoId(firstNonBlank(userInput, identifier)),
+                            "-",
+                            youtubeFailure,
+                            exception
+                    );
+                    messageSender.accept("LOAD_FAILED:" + youtubeFailure.errorKey());
+                    return;
+                }
                 AudioLoadFailureClassifier.Category category = resolveLoadFailureCategory(
                         exception,
                         spotifyPlaylistInspection
@@ -1077,7 +1151,8 @@ public class MusicPlayerService {
             return YOUTUBE_PRECHECK_UNKNOWN_ERROR_KEY;
         }
         return switch (result.status()) {
-            case BLOCKED -> YOUTUBE_PRECHECK_BLOCKED_ERROR_KEY;
+            case BLOCKED, PERMANENT_FAILURE, AUTH_REQUIRED, TEMPORARY_FAILURE ->
+                    YOUTUBE_PRECHECK_BLOCKED_ERROR_KEY;
             case TIMEOUT -> YOUTUBE_PRECHECK_TIMEOUT_ERROR_KEY;
             case LAVALINK_UNAVAILABLE -> YOUTUBE_PRECHECK_UNAVAILABLE_ERROR_KEY;
             case INVALID_YOUTUBE_ID -> YOUTUBE_PRECHECK_INVALID_ERROR_KEY;
@@ -1623,6 +1698,19 @@ public class MusicPlayerService {
 
             @Override
             public void loadFailed(FriendlyException exception) {
+                if (isYoutubeLoadAttempt(trimmed, identifier, resolvedInput.sourceLabel, exception)) {
+                    YoutubeFailureReport youtubeFailure = YOUTUBE_FAILURE_CLASSIFIER.classify(exception);
+                    logYoutubeFailure(
+                            "playlist-add-load",
+                            guild.getIdLong(),
+                            extractYouTubeVideoId(trimmed),
+                            "-",
+                            youtubeFailure,
+                            exception
+                    );
+                    onError.accept(youtubeFailure.errorKey());
+                    return;
+                }
                 AudioLoadFailureClassifier.Category category = FAILURE_CLASSIFIER.classify(exception);
                 if (category != AudioLoadFailureClassifier.Category.UNKNOWN
                         && !looksLikeYouTubeUrl(trimmed)
@@ -1720,10 +1808,45 @@ public class MusicPlayerService {
     }
 
     private void handleTrackException(long guildId, AudioTrack track, Throwable exception) {
+        if (isYoutubeTrack(track) || YOUTUBE_FAILURE_CLASSIFIER.isYoutubeSourceFailure(exception)) {
+            YoutubeFailureReport youtubeFailure = YOUTUBE_FAILURE_CLASSIFIER.classify(exception);
+            recordYoutubePlaybackFailure(youtubeFailure);
+            recordYoutubePrecheckFailure(track, youtubeFailure);
+            logYoutubeFailure(
+                    "playback",
+                    guildId,
+                    youtubeVideoId(track),
+                    trackTitle(track),
+                    youtubeFailure,
+                    exception
+            );
+            if (youtubeFailure.allowsPlaybackRecovery(effectiveYoutubeAuthMode)) {
+                TrackRecoveryService.StartResult recovery = recoverTrack(
+                        guildId,
+                        track,
+                        youtubeFailure.category().name(),
+                        youtubeFailure.errorKey()
+                );
+                if (recovery == TrackRecoveryService.StartResult.STARTED
+                        || recovery == TrackRecoveryService.StartResult.ALREADY_IN_PROGRESS
+                        || recovery == TrackRecoveryService.StartResult.EXHAUSTED
+                        || recovery == TrackRecoveryService.StartResult.STALE) {
+                    return;
+                }
+            }
+            notifyPlaybackFailure(guildId, trackTitle(track), youtubeFailure.errorKey());
+            skipFailedTrack(guildId, track);
+            return;
+        }
         AudioLoadFailureClassifier.Category category = FAILURE_CLASSIFIER.classify(exception);
         logPlaybackFailure(guildId, track, category, exception);
         if (FAILURE_CLASSIFIER.isRecoverable(category)) {
-            TrackRecoveryService.StartResult recovery = recoverTrack(guildId, track, category);
+            TrackRecoveryService.StartResult recovery = recoverTrack(
+                    guildId,
+                    track,
+                    category.name(),
+                    FAILURE_CLASSIFIER.errorKey(category)
+            );
             if (recovery == TrackRecoveryService.StartResult.STARTED
                     || recovery == TrackRecoveryService.StartResult.ALREADY_IN_PROGRESS
                     || recovery == TrackRecoveryService.StartResult.EXHAUSTED
@@ -1746,7 +1869,8 @@ public class MusicPlayerService {
         TrackRecoveryService.StartResult recovery = recoverTrack(
                 guildId,
                 track,
-                AudioLoadFailureClassifier.Category.TRACK_STUCK
+                AudioLoadFailureClassifier.Category.TRACK_STUCK.name(),
+                FAILURE_CLASSIFIER.errorKey(AudioLoadFailureClassifier.Category.TRACK_STUCK)
         );
         if (recovery == TrackRecoveryService.StartResult.STARTED
                 || recovery == TrackRecoveryService.StartResult.ALREADY_IN_PROGRESS
@@ -1760,7 +1884,8 @@ public class MusicPlayerService {
 
     private TrackRecoveryService.StartResult recoverTrack(long guildId,
                                                           AudioTrack track,
-                                                          AudioLoadFailureClassifier.Category category) {
+                                                          String category,
+                                                          String finalErrorKey) {
         GuildMusicManager manager = musicManagers.get(guildId);
         if (manager == null || track == null) {
             return TrackRecoveryService.StartResult.STALE;
@@ -1808,8 +1933,24 @@ public class MusicPlayerService {
 
                     @Override
                     public void recoveryFailed(Throwable failure) {
+                        if (isYoutubeTrack(track) || YOUTUBE_FAILURE_CLASSIFIER.isYoutubeSourceFailure(failure)) {
+                            YoutubeFailureReport youtubeFailure = YOUTUBE_FAILURE_CLASSIFIER.classify(failure);
+                            recordYoutubePlaybackFailure(youtubeFailure);
+                            recordYoutubePrecheckFailure(track, youtubeFailure);
+                            logYoutubeFailure(
+                                    "recovery-load",
+                                    guildId,
+                                    youtubeVideoId(track),
+                                    title,
+                                    youtubeFailure,
+                                    failure
+                            );
+                            notifyPlaybackFailure(guildId, title, youtubeFailure.errorKey());
+                            return;
+                        }
                         logPlaybackFailure(guildId, track, FAILURE_CLASSIFIER.classify(failure), failure);
-                        notifyPlaybackFailure(guildId, title, TRACK_RECOVERY_FAILED_ERROR_KEY);
+                        notifyPlaybackFailure(guildId, title,
+                                finalErrorKey == null ? TRACK_RECOVERY_FAILED_ERROR_KEY : finalErrorKey);
                     }
 
                     @Override
@@ -1820,7 +1961,8 @@ public class MusicPlayerService {
                                 sanitizeInputForLog(track.getIdentifier()),
                                 maxAttempts
                         );
-                        notifyPlaybackFailure(guildId, title, TRACK_RECOVERY_EXHAUSTED_ERROR_KEY);
+                        notifyPlaybackFailure(guildId, title,
+                                finalErrorKey == null ? TRACK_RECOVERY_EXHAUSTED_ERROR_KEY : finalErrorKey);
                     }
                 }
         );
@@ -1941,6 +2083,110 @@ public class MusicPlayerService {
         }
     }
 
+    private boolean isYoutubeLoadAttempt(String userInput,
+                                         String identifier,
+                                         String sourceLabel,
+                                         Throwable failure) {
+        if (YOUTUBE_FAILURE_CLASSIFIER.isYoutubeSourceFailure(failure)) {
+            return true;
+        }
+        if (looksLikeYouTubeUrl(userInput) || looksLikeYouTubeUrl(identifier)) {
+            return true;
+        }
+        String resolved = identifier == null ? "" : identifier.trim();
+        return resolved.regionMatches(true, 0, YT_SEARCH_PREFIX, 0, YT_SEARCH_PREFIX.length())
+                || "youtube".equalsIgnoreCase(normalizeSourceLabel(sourceLabel));
+    }
+
+    private boolean isYoutubeTrack(AudioTrack track) {
+        if (track == null) {
+            return false;
+        }
+        AudioSourceManager sourceManager = track.getSourceManager();
+        if (sourceManager != null && "youtube".equalsIgnoreCase(sourceManager.getSourceName())) {
+            return true;
+        }
+        AudioTrackInfo info = track.getInfo();
+        if (info != null && (looksLikeYouTubeUrl(info.uri)
+                || YouTubePlaybackPrecheckService.isValidVideoId(info.identifier))) {
+            return true;
+        }
+        TrackLoadContext context = readContext(track);
+        return context != null
+                && ("youtube".equalsIgnoreCase(context.sourceName())
+                || looksLikeYouTubeUrl(context.resolvedIdentifier()));
+    }
+
+    private String youtubeVideoId(AudioTrack track) {
+        if (track == null) {
+            return null;
+        }
+        AudioTrackInfo info = track.getInfo();
+        if (info != null) {
+            if (YouTubePlaybackPrecheckService.isValidVideoId(info.identifier)) {
+                return info.identifier.trim();
+            }
+            String uriVideoId = extractYouTubeVideoId(info.uri);
+            if (uriVideoId != null) {
+                return uriVideoId;
+            }
+        }
+        TrackLoadContext context = readContext(track);
+        if (context == null) {
+            return null;
+        }
+        if (YouTubePlaybackPrecheckService.isValidVideoId(context.resolvedIdentifier())) {
+            return context.resolvedIdentifier();
+        }
+        return extractYouTubeVideoId(context.resolvedIdentifier());
+    }
+
+    private void recordYoutubePrecheckFailure(AudioTrack track, YoutubeFailureReport failure) {
+        String videoId = youtubeVideoId(track);
+        if (videoId != null) {
+            youtubePrecheckService.recordPlaybackFailure(videoId, failure);
+        }
+    }
+
+    private void recordYoutubePlaybackFailure(YoutubeFailureReport failure) {
+        if (failure != null) {
+            youtubePlaybackFailureCounters.get(failure.category()).increment();
+        }
+    }
+
+    public Map<YoutubeFailureCategory, Long> getYoutubePlaybackFailureCounts() {
+        Map<YoutubeFailureCategory, Long> snapshot = new EnumMap<>(YoutubeFailureCategory.class);
+        youtubePlaybackFailureCounters.forEach((category, counter) -> snapshot.put(category, counter.sum()));
+        return Map.copyOf(snapshot);
+    }
+
+    private void logYoutubeFailure(String stage,
+                                   long guildId,
+                                   String videoId,
+                                   String title,
+                                   YoutubeFailureReport failure,
+                                   Throwable exception) {
+        YoutubeFailureReport report = failure == null
+                ? YOUTUBE_FAILURE_CLASSIFIER.classify(exception)
+                : failure;
+        String summary = "[NoRule] YouTube " + stage + " failed:"
+                + " guildId=" + guildId
+                + " videoId=" + sanitizeInputForLog(videoId)
+                + " title=" + sanitizeInputForLog(title)
+                + " category=" + report.category()
+                + " recoveryClass=" + report.recoveryClass()
+                + " clients=" + report.clientsSummary();
+        if (report.category() == YoutubeFailureCategory.UNKNOWN) {
+            LOGGER.error(summary, exception);
+            return;
+        }
+        LOGGER.warn(summary);
+        if (LOGGER.isDebugEnabled() && exception != null) {
+            LOGGER.debug("YouTube {} failure details: guildId={} videoId={}",
+                    stage, guildId, sanitizeInputForLog(videoId), exception);
+        }
+    }
+
     private String trackTitle(AudioTrack track) {
         return track == null || track.getInfo() == null || track.getInfo().title == null
                 ? "-"
@@ -2032,8 +2278,16 @@ public class MusicPlayerService {
                 if (tryFallback()) {
                     return;
                 }
-                String msg = exception == null || exception.getMessage() == null ? "-" : exception.getMessage().trim();
-                setAutoplayNotice(guildId, "LOAD_FAILED:" + msg);
+                YoutubeFailureReport youtubeFailure = YOUTUBE_FAILURE_CLASSIFIER.classify(exception);
+                logYoutubeFailure(
+                        "autoplay-load",
+                        guildId,
+                        extractYouTubeVideoId(identifier),
+                        "-",
+                        youtubeFailure,
+                        exception
+                );
+                setAutoplayNotice(guildId, "LOAD_FAILED:" + youtubeFailure.errorKey());
             }
 
             private boolean tryFallback() {
@@ -2493,16 +2747,17 @@ public class MusicPlayerService {
         return STRICT_YOUTUBE_PLAYLIST_PREFIX + listId;
     }
 
-    private void enqueuePlaylistTracksBatched(GuildMusicManager guildMusicManager,
-                                              List<AudioTrack> tracks,
-                                              String sourceLabel,
-                                              Long requesterId,
-                                              String requesterName,
-                                              String originalInput,
-                                              String loadIdentifier) {
+    private AudioTrack enqueuePlaylistTracksBatched(GuildMusicManager guildMusicManager,
+                                                    List<AudioTrack> tracks,
+                                                    String sourceLabel,
+                                                    Long requesterId,
+                                                    String requesterName,
+                                                    String originalInput,
+                                                    String loadIdentifier) {
         if (tracks == null || tracks.isEmpty()) {
-            return;
+            return null;
         }
+        AudioTrack firstQueued = null;
         for (int i = 0; i < tracks.size(); i += YOUTUBE_PLAYLIST_BATCH_SIZE) {
             int end = Math.min(i + YOUTUBE_PLAYLIST_BATCH_SIZE, tracks.size());
             for (int j = i; j < end; j++) {
@@ -2510,10 +2765,18 @@ public class MusicPlayerService {
                 if (track == null) {
                     continue;
                 }
+                YouTubePlaybackPrecheckResult precheck = precheckTrack(track, sourceLabel);
+                if (!precheck.allowsQueue()) {
+                    continue;
+                }
                 applyTrackMetadata(track, sourceLabel, requesterId, requesterName, originalInput, loadIdentifier);
                 guildMusicManager.getScheduler().queue(track);
+                if (firstQueued == null) {
+                    firstQueued = track;
+                }
             }
         }
+        return firstQueued;
     }
 
     private void cacheYoutubePlaylistTracks(String sourceUrl, List<AudioTrack> tracks) {
@@ -2650,6 +2913,26 @@ public class MusicPlayerService {
                     : null;
         } catch (IllegalArgumentException ignored) {
             return null;
+        }
+    }
+
+    private static Map<YoutubeFailureCategory, LongAdder> createYoutubeFailureCounters() {
+        Map<YoutubeFailureCategory, LongAdder> counters = new EnumMap<>(YoutubeFailureCategory.class);
+        for (YoutubeFailureCategory category : YoutubeFailureCategory.values()) {
+            counters.put(category, new LongAdder());
+        }
+        return counters;
+    }
+
+    private record YoutubeAuthRuntime(
+            MusicConfig.Youtube.AuthMode mode,
+            boolean strict,
+            String poToken,
+            String visitorData,
+            String oauthRefreshToken
+    ) {
+        private static YoutubeAuthRuntime none(boolean strict) {
+            return new YoutubeAuthRuntime(MusicConfig.Youtube.AuthMode.NONE, strict, null, null, null);
         }
     }
 

@@ -56,35 +56,96 @@ class YouTubePlaybackPrecheckServiceTest {
     }
 
     @Test
-    void status400IsBlockedAndCached() {
+    void status400IsPermanentAndCached() {
         FakeStreamClient client = new FakeStreamClient();
         client.statusCode = 400;
-        YouTubePlaybackPrecheckService service = service(strictPrecheck(true), client, new MutableClock(START));
+        MutableClock clock = new MutableClock(START);
+        YouTubePlaybackPrecheckService service = service(strictPrecheck(true), client, clock);
 
-        assertEquals(YouTubePlaybackPrecheckStatus.BLOCKED, service.check(VIDEO_ID).status());
-        assertEquals(YouTubePlaybackPrecheckStatus.BLOCKED, service.check(VIDEO_ID).status());
+        assertEquals(YouTubePlaybackPrecheckStatus.PERMANENT_FAILURE, service.check(VIDEO_ID).status());
+        clock.advance(Duration.ofHours(24));
+        assertEquals(YouTubePlaybackPrecheckStatus.PERMANENT_FAILURE, service.check(VIDEO_ID).status());
         assertEquals(1, client.calls());
     }
 
     @Test
-    void connectionFailureIsUnavailableAndNotCached() {
+    void connectionFailureIsUnavailableAndCachedForTheTemporaryTtl() {
         FakeStreamClient client = new FakeStreamClient();
         client.failure = new IOException("connection refused");
         YouTubePlaybackPrecheckService service = service(strictPrecheck(true), client, new MutableClock(START));
 
         assertEquals(YouTubePlaybackPrecheckStatus.LAVALINK_UNAVAILABLE, service.check(VIDEO_ID).status());
         assertEquals(YouTubePlaybackPrecheckStatus.LAVALINK_UNAVAILABLE, service.check(VIDEO_ID).status());
-        assertEquals(2, client.calls());
+        assertEquals(1, client.calls());
     }
 
     @Test
-    void timeoutIsClassifiedAndNotCached() {
+    void timeoutIsClassifiedAndCachedForTheTemporaryTtl() {
         FakeStreamClient client = new FakeStreamClient();
         client.failure = new HttpTimeoutException("request timed out");
         YouTubePlaybackPrecheckService service = service(strictPrecheck(true), client, new MutableClock(START));
 
         assertEquals(YouTubePlaybackPrecheckStatus.TIMEOUT, service.check(VIDEO_ID).status());
         assertEquals(YouTubePlaybackPrecheckStatus.TIMEOUT, service.check(VIDEO_ID).status());
+        assertEquals(1, client.calls());
+    }
+
+    @Test
+    void temporaryFailureExpiresBeforePlayableOrPermanentResults() {
+        MutableClock clock = new MutableClock(START);
+        FakeStreamClient client = new FakeStreamClient();
+        client.statusCode = 500;
+        YouTubePlaybackPrecheckService service = service(strictPrecheck(true), client, clock);
+
+        assertEquals(YouTubePlaybackPrecheckStatus.TEMPORARY_FAILURE, service.check(VIDEO_ID).status());
+        clock.advance(Duration.ofMinutes(9));
+        assertEquals(YouTubePlaybackPrecheckStatus.TEMPORARY_FAILURE, service.check(VIDEO_ID).status());
+        assertEquals(1, client.calls());
+
+        clock.advance(Duration.ofMinutes(1).plusMillis(1));
+        client.statusCode = 200;
+        assertEquals(YouTubePlaybackPrecheckStatus.OK, service.check(VIDEO_ID).status());
+        assertEquals(2, client.calls());
+    }
+
+    @Test
+    void authFailureUsesTheShortTtl() {
+        MutableClock clock = new MutableClock(START);
+        FakeStreamClient client = new FakeStreamClient();
+        client.statusCode = 403;
+        YouTubePlaybackPrecheckService service = service(strictPrecheck(true), client, clock);
+
+        assertEquals(YouTubePlaybackPrecheckStatus.AUTH_REQUIRED, service.check(VIDEO_ID).status());
+        clock.advance(Duration.ofMinutes(10).plusMillis(1));
+        client.statusCode = 200;
+        assertEquals(YouTubePlaybackPrecheckStatus.OK, service.check(VIDEO_ID).status());
+        assertEquals(2, client.calls());
+    }
+
+    @Test
+    void playbackFailureInvalidatesPlayableCacheAndStoresTemporaryFailure() {
+        MutableClock clock = new MutableClock(START);
+        FakeStreamClient client = new FakeStreamClient();
+        client.statusCode = 200;
+        YouTubePlaybackPrecheckService service = service(strictPrecheck(true), client, clock);
+
+        assertEquals(YouTubePlaybackPrecheckStatus.OK, service.check(VIDEO_ID).status());
+        service.recordPlaybackFailure(
+                VIDEO_ID,
+                new YoutubeFailureReport(
+                        YoutubeFailureCategory.HTTP_FORBIDDEN,
+                        YoutubeRecoveryClass.CLIENT_FALLBACK_MAY_HELP,
+                        403,
+                        java.util.List.of(),
+                        false
+                )
+        );
+
+        assertEquals(YouTubePlaybackPrecheckStatus.TEMPORARY_FAILURE, service.check(VIDEO_ID).status());
+        assertEquals(1, client.calls());
+
+        clock.advance(Duration.ofMinutes(10).plusMillis(1));
+        assertEquals(YouTubePlaybackPrecheckStatus.OK, service.check(VIDEO_ID).status());
         assertEquals(2, client.calls());
     }
 
@@ -109,6 +170,9 @@ class YouTubePlaybackPrecheckServiceTest {
         return new MusicConfig.Youtube.StrictPrecheck(
                 enabled,
                 24,
+                24,
+                10,
+                48,
                 5000,
                 "http://localhost:2333",
                 "test-password"

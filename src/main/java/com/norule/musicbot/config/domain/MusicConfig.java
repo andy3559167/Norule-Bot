@@ -104,6 +104,7 @@ public final class MusicConfig {
         private final String cipherServer;
         private final String cipherPassword;
         private final String cipherUserAgent;
+        private final Auth auth;
         private final StrictPrecheck strictPrecheck;
 
         public Youtube(boolean oauthEnabled,
@@ -113,12 +114,25 @@ public final class MusicConfig {
                        String cipherPassword,
                        String cipherUserAgent,
                        StrictPrecheck strictPrecheck) {
+            this(oauthEnabled, cipherEnabled, oauthRefreshToken, cipherServer, cipherPassword,
+                    cipherUserAgent, Auth.fromLegacy(null, oauthEnabled, oauthRefreshToken), strictPrecheck);
+        }
+
+        public Youtube(boolean oauthEnabled,
+                       boolean cipherEnabled,
+                       String oauthRefreshToken,
+                       String cipherServer,
+                       String cipherPassword,
+                       String cipherUserAgent,
+                       Auth auth,
+                       StrictPrecheck strictPrecheck) {
             this.oauthEnabled = oauthEnabled;
             this.cipherEnabled = cipherEnabled;
             this.oauthRefreshToken = oauthRefreshToken == null ? "" : oauthRefreshToken;
             this.cipherServer = cipherServer == null ? "" : cipherServer;
             this.cipherPassword = cipherPassword == null ? "" : cipherPassword;
             this.cipherUserAgent = cipherUserAgent == null ? "" : cipherUserAgent;
+            this.auth = auth == null ? Auth.fromLegacy(null, oauthEnabled, oauthRefreshToken) : auth;
             this.strictPrecheck = strictPrecheck == null ? StrictPrecheck.fromLegacy(null) : strictPrecheck;
         }
 
@@ -131,6 +145,7 @@ public final class MusicConfig {
                     value.getCipherServer(),
                     value.getCipherPassword(),
                     value.getCipherUserAgent(),
+                    Auth.fromLegacy(value.getAuth(), value.isOauthEnabled(), value.getOauthRefreshToken()),
                     StrictPrecheck.fromLegacy(value.getStrictPrecheck())
             );
         }
@@ -141,11 +156,77 @@ public final class MusicConfig {
         public String getCipherServer() { return cipherServer; }
         public String getCipherPassword() { return cipherPassword; }
         public String getCipherUserAgent() { return cipherUserAgent; }
+        public Auth getAuth() { return auth; }
         public StrictPrecheck getStrictPrecheck() { return strictPrecheck; }
+
+        public enum AuthMode {
+            NONE,
+            POT,
+            OAUTH;
+
+            static AuthMode from(String value) {
+                if (value == null || value.isBlank()) {
+                    return NONE;
+                }
+                try {
+                    return AuthMode.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+                } catch (IllegalArgumentException ignored) {
+                    return NONE;
+                }
+            }
+        }
+
+        public static final class Auth {
+            private final AuthMode mode;
+            private final boolean strictAuthConfig;
+            private final String poToken;
+            private final String visitorData;
+            private final String oauthRefreshToken;
+
+            private Auth(AuthMode mode,
+                         boolean strictAuthConfig,
+                         String poToken,
+                         String visitorData,
+                         String oauthRefreshToken) {
+                this.mode = mode == null ? AuthMode.NONE : mode;
+                this.strictAuthConfig = strictAuthConfig;
+                this.poToken = poToken == null ? "" : poToken;
+                this.visitorData = visitorData == null ? "" : visitorData;
+                this.oauthRefreshToken = oauthRefreshToken == null ? "" : oauthRefreshToken;
+            }
+
+            static Auth fromLegacy(BotConfig.Music.Youtube.Auth legacy,
+                                   boolean legacyOauthEnabled,
+                                   String legacyOauthRefreshToken) {
+                if (legacy == null) {
+                    AuthMode legacyMode = legacyOauthEnabled
+                            || (legacyOauthRefreshToken != null && !legacyOauthRefreshToken.isBlank())
+                            ? AuthMode.OAUTH
+                            : AuthMode.NONE;
+                    return new Auth(legacyMode, false, "", "", legacyOauthRefreshToken);
+                }
+                return new Auth(
+                        AuthMode.from(legacy.getMode()),
+                        legacy.isStrictAuthConfig(),
+                        legacy.getPoToken(),
+                        legacy.getVisitorData(),
+                        legacy.getOauthRefreshToken()
+                );
+            }
+
+            public AuthMode getMode() { return mode; }
+            public boolean isStrictAuthConfig() { return strictAuthConfig; }
+            public String getPoToken() { return poToken; }
+            public String getVisitorData() { return visitorData; }
+            public String getOauthRefreshToken() { return oauthRefreshToken; }
+        }
 
         public static final class StrictPrecheck {
             private final boolean enabled;
             private final int cacheTtlHours;
+            private final int playableTtlHours;
+            private final int temporaryFailureTtlMinutes;
+            private final int permanentFailureTtlHours;
             private final int timeoutMillis;
             private final String lavalinkBaseUrl;
             private final String lavalinkPassword;
@@ -155,8 +236,23 @@ public final class MusicConfig {
                                   int timeoutMillis,
                                   String lavalinkBaseUrl,
                                   String lavalinkPassword) {
+                this(enabled, cacheTtlHours, cacheTtlHours, 10, cacheTtlHours,
+                        timeoutMillis, lavalinkBaseUrl, lavalinkPassword);
+            }
+
+            public StrictPrecheck(boolean enabled,
+                                  int cacheTtlHours,
+                                  int playableTtlHours,
+                                  int temporaryFailureTtlMinutes,
+                                  int permanentFailureTtlHours,
+                                  int timeoutMillis,
+                                  String lavalinkBaseUrl,
+                                  String lavalinkPassword) {
                 this.enabled = enabled;
                 this.cacheTtlHours = Math.max(1, cacheTtlHours);
+                this.playableTtlHours = Math.max(1, playableTtlHours);
+                this.temporaryFailureTtlMinutes = Math.max(1, temporaryFailureTtlMinutes);
+                this.permanentFailureTtlHours = Math.max(1, permanentFailureTtlHours);
                 this.timeoutMillis = Math.max(1, timeoutMillis);
                 this.lavalinkBaseUrl = lavalinkBaseUrl == null ? "" : lavalinkBaseUrl;
                 this.lavalinkPassword = lavalinkPassword == null ? "" : lavalinkPassword;
@@ -168,6 +264,9 @@ public final class MusicConfig {
                 return new StrictPrecheck(
                         value.isEnabled(),
                         value.getCacheTtlHours(),
+                        value.getPlayableTtlHours(),
+                        value.getTemporaryFailureTtlMinutes(),
+                        value.getPermanentFailureTtlHours(),
                         value.getTimeoutMillis(),
                         value.getLavalinkBaseUrl(),
                         value.getLavalinkPassword()
@@ -176,6 +275,9 @@ public final class MusicConfig {
 
             public boolean isEnabled() { return enabled; }
             public int getCacheTtlHours() { return cacheTtlHours; }
+            public int getPlayableTtlHours() { return playableTtlHours; }
+            public int getTemporaryFailureTtlMinutes() { return temporaryFailureTtlMinutes; }
+            public int getPermanentFailureTtlHours() { return permanentFailureTtlHours; }
             public int getTimeoutMillis() { return timeoutMillis; }
             public String getLavalinkBaseUrl() { return lavalinkBaseUrl; }
             public String getLavalinkPassword() { return lavalinkPassword; }

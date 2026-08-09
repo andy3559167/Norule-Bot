@@ -1,10 +1,12 @@
 package com.norule.musicbot.domain.music;
 
 import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
+import dev.lavalink.youtube.AllClientsFailedException;
 import org.junit.jupiter.api.Test;
 
 import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -113,6 +115,13 @@ class AudioLoadFailureClassifierTest {
         assertNotEquals(AudioLoadFailureClassifier.Category.SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE, unauthorized);
         assertNotEquals(AudioLoadFailureClassifier.Category.SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE, rateLimited);
         assertNotEquals(AudioLoadFailureClassifier.Category.SPOTIFY_GENERATED_PLAYLIST_UNAVAILABLE, missingPlaylist);
+    }
+
+    @Test
+    void leavesYoutubeAggregateForTheDedicatedClassifier() {
+        AllClientsFailedException failure = new AllClientsFailedException(List.of());
+
+        assertEquals(AudioLoadFailureClassifier.Category.UNKNOWN, classifier.classify(failure));
     }
 
     private FriendlyException friendly(String message, Throwable cause) {

@@ -31,6 +31,7 @@ public class TrackScheduler extends AudioEventAdapter {
     private long playbackGeneration;
     private AudioTrack recoveringTrack;
     private long recoveringGeneration = -1L;
+    private AudioTrack failedTrackAwaitingEnd;
 
     public TrackScheduler(AudioPlayer player) {
         this.player = player;
@@ -55,6 +56,7 @@ public class TrackScheduler extends AudioEventAdapter {
         queue.clear();
         playbackGeneration++;
         clearRecoveryMarker();
+        failedTrackAwaitingEnd = null;
         notifyStateChanged();
     }
 
@@ -148,6 +150,7 @@ public class TrackScheduler extends AudioEventAdapter {
 
     public synchronized void skipIfCurrent(AudioTrack expectedTrack, long expectedGeneration) {
         if (isActiveTrack(expectedTrack, expectedGeneration)) {
+            failedTrackAwaitingEnd = expectedTrack;
             nextTrack();
         }
     }
@@ -173,6 +176,12 @@ public class TrackScheduler extends AudioEventAdapter {
             endListener.accept(track);
         }
         if (!endReason.mayStartNext) {
+            notifyStateChanged();
+            return;
+        }
+
+        if (endReason == AudioTrackEndReason.LOAD_FAILED && failedTrackAwaitingEnd == track) {
+            failedTrackAwaitingEnd = null;
             notifyStateChanged();
             return;
         }

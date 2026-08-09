@@ -80,23 +80,73 @@ public final class YouTubePlaybackPrecheckService {
             Duration timeout = Duration.ofMillis(Math.max(1, config.getTimeoutMillis()));
             int httpStatus = streamStatusClient.fetchStreamStatus(baseUrl, password == null ? "" : password, videoId, timeout);
             YouTubePlaybackPrecheckResult classified = classify(videoId, now, config, httpStatus);
-            cacheIfStable(videoId, classified);
+            cacheResult(videoId, classified);
             return classified;
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             LOG.warn("Lavalink YouTube precheck interrupted videoId={}", videoId);
-            return result(YouTubePlaybackPrecheckStatus.LAVALINK_UNAVAILABLE, videoId, now, null, "interrupted", null);
+            YouTubePlaybackPrecheckResult failure = temporaryResult(
+                    YouTubePlaybackPrecheckStatus.LAVALINK_UNAVAILABLE, videoId, now, config, "interrupted", null);
+            cacheResult(videoId, failure);
+            return failure;
         } catch (IOException ex) {
             if (isTimeout(ex)) {
                 LOG.warn("Lavalink YouTube precheck timeout videoId={}", videoId);
-                return result(YouTubePlaybackPrecheckStatus.TIMEOUT, videoId, now, null, "timeout", null);
+                YouTubePlaybackPrecheckResult failure = temporaryResult(
+                        YouTubePlaybackPrecheckStatus.TIMEOUT, videoId, now, config, "timeout", null);
+                cacheResult(videoId, failure);
+                return failure;
             }
             LOG.warn("Lavalink YouTube precheck unavailable videoId={} reason={}", videoId, safeMessage(ex));
-            return result(YouTubePlaybackPrecheckStatus.LAVALINK_UNAVAILABLE, videoId, now, null, safeMessage(ex), null);
+            YouTubePlaybackPrecheckResult failure = temporaryResult(
+                    YouTubePlaybackPrecheckStatus.LAVALINK_UNAVAILABLE,
+                    videoId,
+                    now,
+                    config,
+                    safeMessage(ex),
+                    null
+            );
+            cacheResult(videoId, failure);
+            return failure;
         } catch (RuntimeException ex) {
             LOG.error("Unexpected YouTube precheck error videoId={}", videoId, ex);
-            return result(YouTubePlaybackPrecheckStatus.UNKNOWN_ERROR, videoId, now, null, safeMessage(ex), null);
+            YouTubePlaybackPrecheckResult failure = temporaryResult(
+                    YouTubePlaybackPrecheckStatus.UNKNOWN_ERROR,
+                    videoId,
+                    now,
+                    config,
+                    safeMessage(ex),
+                    null
+            );
+            cacheResult(videoId, failure);
+            return failure;
         }
+    }
+
+    public void recordPlaybackFailure(String input, YoutubeFailureReport failure) {
+        VideoCandidate candidate = findVideoCandidate(input);
+        if (candidate.status != YouTubePlaybackPrecheckStatus.OK || candidate.videoId == null) {
+            return;
+        }
+        String videoId = candidate.videoId;
+        cache.remove(videoId);
+        MusicConfig.Youtube.StrictPrecheck config = config();
+        if (!config.isEnabled() || failure == null) {
+            return;
+        }
+        Instant checkedAt = clock.instant();
+        YouTubePlaybackPrecheckStatus status = switch (failure.recoveryClass()) {
+            case AUTH_MAY_HELP -> YouTubePlaybackPrecheckStatus.AUTH_REQUIRED;
+            case PERMANENT -> YouTubePlaybackPrecheckStatus.PERMANENT_FAILURE;
+            case RETRYABLE, CLIENT_FALLBACK_MAY_HELP, DECODER_FALLBACK_MAY_HELP, UNKNOWN ->
+                    YouTubePlaybackPrecheckStatus.TEMPORARY_FAILURE;
+        };
+        YouTubePlaybackPrecheckResult cachedFailure = status == YouTubePlaybackPrecheckStatus.PERMANENT_FAILURE
+                ? permanentResult(videoId, checkedAt, config, failure.category().name(), failure.httpStatus())
+                : temporaryResult(status, videoId, checkedAt, config, failure.category().name(), failure.httpStatus());
+        cacheResult(videoId, cachedFailure);
+        LOG.debug("YouTube playable cache invalidated after playback failure videoId={} category={} cachedAs={}",
+                videoId, failure.category(), status);
     }
 
     public static boolean isValidVideoId(String value) {
@@ -118,36 +168,62 @@ public final class YouTubePlaybackPrecheckService {
                                                   MusicConfig.Youtube.StrictPrecheck config,
                                                   int httpStatus) {
         if (httpStatus >= 200 && httpStatus < 300) {
-            return cacheableResult(YouTubePlaybackPrecheckStatus.OK, videoId, checkedAt, config, "stream endpoint returned OK", httpStatus);
+            return playableResult(videoId, checkedAt, config, "stream endpoint returned OK", httpStatus);
         }
         if (httpStatus == 400 || httpStatus == 404) {
-            return cacheableResult(YouTubePlaybackPrecheckStatus.BLOCKED, videoId, checkedAt, config, "stream endpoint rejected video", httpStatus);
+            return permanentResult(videoId, checkedAt, config, "stream endpoint rejected video", httpStatus);
         }
         if (httpStatus == 408) {
             LOG.warn("Lavalink YouTube precheck timeout response videoId={} httpStatus={}", videoId, httpStatus);
-            return result(YouTubePlaybackPrecheckStatus.TIMEOUT, videoId, checkedAt, null, "stream endpoint timeout", httpStatus);
+            return temporaryResult(YouTubePlaybackPrecheckStatus.TIMEOUT,
+                    videoId, checkedAt, config, "stream endpoint timeout", httpStatus);
         }
-        if (httpStatus == 401 || httpStatus == 403 || httpStatus >= 500) {
+        if (httpStatus == 401 || httpStatus == 403) {
+            LOG.warn("Lavalink YouTube precheck requires authentication videoId={} httpStatus={}", videoId, httpStatus);
+            return temporaryResult(YouTubePlaybackPrecheckStatus.AUTH_REQUIRED,
+                    videoId, checkedAt, config, "stream endpoint requires authentication", httpStatus);
+        }
+        if (httpStatus == 429 || httpStatus >= 500) {
             LOG.warn("Lavalink YouTube precheck unavailable videoId={} httpStatus={}", videoId, httpStatus);
-            return result(YouTubePlaybackPrecheckStatus.LAVALINK_UNAVAILABLE, videoId, checkedAt, null, "stream endpoint unavailable", httpStatus);
+            return temporaryResult(YouTubePlaybackPrecheckStatus.TEMPORARY_FAILURE,
+                    videoId, checkedAt, config, "stream endpoint temporarily unavailable", httpStatus);
         }
         LOG.warn("Unexpected Lavalink YouTube precheck response videoId={} httpStatus={}", videoId, httpStatus);
-        return result(YouTubePlaybackPrecheckStatus.UNKNOWN_ERROR, videoId, checkedAt, null, "unexpected stream endpoint response", httpStatus);
+        return temporaryResult(YouTubePlaybackPrecheckStatus.UNKNOWN_ERROR,
+                videoId, checkedAt, config, "unexpected stream endpoint response", httpStatus);
     }
 
-    private YouTubePlaybackPrecheckResult cacheableResult(YouTubePlaybackPrecheckStatus status,
+    private YouTubePlaybackPrecheckResult playableResult(String videoId,
+                                                         Instant checkedAt,
+                                                         MusicConfig.Youtube.StrictPrecheck config,
+                                                         String reason,
+                                                         Integer httpStatus) {
+        Instant expiresAt = checkedAt.plus(Duration.ofHours(config.getPlayableTtlHours()));
+        return result(YouTubePlaybackPrecheckStatus.OK, videoId, checkedAt, expiresAt, reason, httpStatus);
+    }
+
+    private YouTubePlaybackPrecheckResult temporaryResult(YouTubePlaybackPrecheckStatus status,
                                                           String videoId,
                                                           Instant checkedAt,
                                                           MusicConfig.Youtube.StrictPrecheck config,
                                                           String reason,
-                                                          int httpStatus) {
-        Instant expiresAt = checkedAt.plus(Duration.ofHours(Math.max(1, config.getCacheTtlHours())));
+                                                          Integer httpStatus) {
+        Instant expiresAt = checkedAt.plus(Duration.ofMinutes(config.getTemporaryFailureTtlMinutes()));
         return result(status, videoId, checkedAt, expiresAt, reason, httpStatus);
     }
 
-    private void cacheIfStable(String videoId, YouTubePlaybackPrecheckResult result) {
-        if (result.status() != YouTubePlaybackPrecheckStatus.OK
-                && result.status() != YouTubePlaybackPrecheckStatus.BLOCKED) {
+    private YouTubePlaybackPrecheckResult permanentResult(String videoId,
+                                                          Instant checkedAt,
+                                                          MusicConfig.Youtube.StrictPrecheck config,
+                                                          String reason,
+                                                          Integer httpStatus) {
+        Instant expiresAt = checkedAt.plus(Duration.ofHours(config.getPermanentFailureTtlHours()));
+        return result(YouTubePlaybackPrecheckStatus.PERMANENT_FAILURE,
+                videoId, checkedAt, expiresAt, reason, httpStatus);
+    }
+
+    private void cacheResult(String videoId, YouTubePlaybackPrecheckResult result) {
+        if (result == null || result.expiresAt() == null) {
             return;
         }
         cache.put(videoId, new CachedYouTubePrecheckResult(

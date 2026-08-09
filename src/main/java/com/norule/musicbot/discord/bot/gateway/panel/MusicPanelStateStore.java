@@ -21,18 +21,33 @@ public final class MusicPanelStateStore {
         return panelByGuild.get(guildId);
     }
 
-    public void putPanelRef(long guildId, PanelRef panelRef) {
+    public synchronized void putPanelRef(long guildId, PanelRef panelRef) {
         panelByGuild.put(guildId, panelRef);
     }
 
-    public PanelRef removePanelRef(long guildId) {
+    public synchronized PanelRef removePanelRef(long guildId) {
         return panelByGuild.remove(guildId);
     }
 
-    public void clearPanelState(long guildId) {
+    public synchronized void clearPanelState(long guildId) {
         panelByGuild.remove(guildId);
         panelLastSignature.remove(guildId);
         panelLastRefreshAt.remove(guildId);
+    }
+
+    public synchronized boolean compareAndClearPanelState(long guildId,
+                                                          long expectedChannelId,
+                                                          long expectedMessageId) {
+        PanelRef active = panelByGuild.get(guildId);
+        if (active == null
+                || active.channelId != expectedChannelId
+                || active.messageId != expectedMessageId
+                || !panelByGuild.remove(guildId, active)) {
+            return false;
+        }
+        panelLastSignature.remove(guildId);
+        panelLastRefreshAt.remove(guildId);
+        return true;
     }
 
     public long getLastRefreshAt(long guildId) {
