@@ -1009,8 +1009,12 @@ public final class RuntimeBootstrap {
 
     private static ShortUrlService createShortUrlService(BotConfig config, Path baseDir) {
         ShortUrlConfig shortUrlConfig = new ShortUrlConfig(config.getShortUrl());
-        String quotaHmacSecret = mediaSecuritySecret(shortUrlConfig, "SHORT_URL_QUOTA_HMAC_SECRET");
-        String deviceHmacSecret = mediaSecuritySecret(shortUrlConfig, "SHORT_URL_DEVICE_HMAC_SECRET");
+        String quotaHmacSecret = mediaSecuritySecret(shortUrlConfig,
+                "SHORT_URL_QUOTA_HMAC_SECRET", shortUrlConfig.getQuotaHmacSecret(),
+                "shortUrl.image.abuseProtection.secrets.quotaHmacSecret");
+        String deviceHmacSecret = mediaSecuritySecret(shortUrlConfig,
+                "SHORT_URL_DEVICE_HMAC_SECRET", shortUrlConfig.getDeviceHmacSecret(),
+                "shortUrl.image.abuseProtection.secrets.deviceHmacSecret");
         ShortUrlRepository repository = createShortUrlRepository(shortUrlConfig, baseDir);
         MediaSecurityRepository securityRepository = createMediaSecurityRepository(shortUrlConfig, baseDir);
         ImageShareService imageShareService = createImageShareService(
@@ -1088,13 +1092,17 @@ public final class RuntimeBootstrap {
         return new SqliteMediaSecurityRepository(resolveDataPath(baseDir, config.getSqlite().getPath()));
     }
 
-    private static String mediaSecuritySecret(ShortUrlConfig config, String environmentName) {
+    private static String mediaSecuritySecret(ShortUrlConfig config, String environmentName,
+                                              String configuredValue, String configPath) {
         String value = System.getenv(environmentName);
         if (value != null && !value.isBlank()) {
             return value.trim();
         }
+        if (configuredValue != null && !configuredValue.isBlank()) {
+            return configuredValue.trim();
+        }
         if (config.isEnabled() && config.getImage().isEnabled()) {
-            throw new IllegalStateException(environmentName
+            throw new IllegalStateException(environmentName + " or " + configPath
                     + " is required when short URL media sharing is enabled");
         }
         return "disabled-short-url-media-secret";

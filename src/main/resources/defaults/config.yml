@@ -162,7 +162,8 @@ database:
     path: "data/norule.db"
 
 # Short URL service
-# 啟用媒體分享時必須設定環境變數 SHORT_URL_QUOTA_HMAC_SECRET 與 SHORT_URL_DEVICE_HMAC_SECRET。
+# 啟用媒體分享時必須設定下方 secrets，或使用環境變數
+# SHORT_URL_QUOTA_HMAC_SECRET 與 SHORT_URL_DEVICE_HMAC_SECRET（環境變數優先）。
 shortUrl:
   enabled: false
   bindHost: "0.0.0.0"
@@ -183,6 +184,10 @@ shortUrl:
     expiredShareRetentionDays: 30
     storagePath: "data/short-url-images"
     abuseProtection:
+      secrets:
+        # 請使用兩組獨立、長期固定的隨機值；不要把真實 secret 提交到版本控制。
+        quotaHmacSecret: ""
+        deviceHmacSecret: ""
       identityContinuity:
         enabled: true
         anonymousToAccountMergeWindowMinutes: 120

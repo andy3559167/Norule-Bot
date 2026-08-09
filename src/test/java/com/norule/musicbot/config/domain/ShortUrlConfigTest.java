@@ -39,6 +39,10 @@ class ShortUrlConfigTest {
                                         "tempPath", "data/media-tmp",
                                         "expiredArchivePath", "data/media-archive",
                                         "filesystemStopPercent", 85
+                                ),
+                                "secrets", Map.of(
+                                        "quotaHmacSecret", " quota-secret ",
+                                        "deviceHmacSecret", " device-secret "
                                 )
                         )
                 )
@@ -55,6 +59,8 @@ class ShortUrlConfigTest {
         assertEquals("data/media-tmp", config.getTemporaryStoragePath());
         assertEquals("data/media-archive", config.getExpiredArchivePath());
         assertEquals(85, image.filesystemStopPercent());
+        assertEquals("quota-secret", config.getQuotaHmacSecret());
+        assertEquals("device-secret", config.getDeviceHmacSecret());
     }
 
     @Test

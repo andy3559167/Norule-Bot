@@ -2904,18 +2904,49 @@ public String getToken() {
                 public int getFilesystemStopPercent() { return filesystemStopPercent; }
             }
 
+            public static final class Secrets {
+                private final String quotaHmacSecret;
+                private final String deviceHmacSecret;
+
+                private Secrets(String quotaHmacSecret, String deviceHmacSecret) {
+                    this.quotaHmacSecret = normalizeSecret(quotaHmacSecret);
+                    this.deviceHmacSecret = normalizeSecret(deviceHmacSecret);
+                }
+
+                private static Secrets fromMap(Map<String, Object> map, Secrets fallback) {
+                    Secrets defaults = fallback == null ? defaultValues() : fallback;
+                    return new Secrets(
+                            getString(map, "quotaHmacSecret", defaults.getQuotaHmacSecret()),
+                            getString(map, "deviceHmacSecret", defaults.getDeviceHmacSecret()));
+                }
+
+                private static Secrets defaultValues() {
+                    return new Secrets("", "");
+                }
+
+                private static String normalizeSecret(String value) {
+                    return value == null ? "" : value.trim();
+                }
+
+                public String getQuotaHmacSecret() { return quotaHmacSecret; }
+                public String getDeviceHmacSecret() { return deviceHmacSecret; }
+            }
+
             public static final class AbuseProtection {
                 private final IdentityContinuity identityContinuity;
                 private final PasswordProtection passwordProtection;
                 private final Storage storage;
+                private final Secrets secrets;
 
                 private AbuseProtection(IdentityContinuity identityContinuity,
-                                        PasswordProtection passwordProtection, Storage storage) {
+                                        PasswordProtection passwordProtection, Storage storage,
+                                        Secrets secrets) {
                     this.identityContinuity = identityContinuity == null
                             ? IdentityContinuity.defaultValues() : identityContinuity;
                     this.passwordProtection = passwordProtection == null
                             ? PasswordProtection.defaultValues() : passwordProtection;
                     this.storage = storage == null ? Storage.defaultValues() : storage;
+                    this.secrets = secrets == null ? Secrets.defaultValues() : secrets;
                 }
 
                 private static AbuseProtection fromMap(Map<String, Object> map,
@@ -2928,17 +2959,20 @@ public String getToken() {
                             PasswordProtection.fromMap(asMap(map.get("passwordProtection")),
                                     defaults.getPasswordProtection()),
                             Storage.fromMap(asMap(map.get("storage")), defaults.getStorage(),
-                                    legacyActivePath));
+                                    legacyActivePath),
+                            Secrets.fromMap(asMap(map.get("secrets")), defaults.getSecrets()));
                 }
 
                 private static AbuseProtection defaultValues() {
                     return new AbuseProtection(IdentityContinuity.defaultValues(),
-                            PasswordProtection.defaultValues(), Storage.defaultValues());
+                            PasswordProtection.defaultValues(), Storage.defaultValues(),
+                            Secrets.defaultValues());
                 }
 
                 public IdentityContinuity getIdentityContinuity() { return identityContinuity; }
                 public PasswordProtection getPasswordProtection() { return passwordProtection; }
                 public Storage getStorage() { return storage; }
+                public Secrets getSecrets() { return secrets; }
             }
 
             private final boolean enabled;

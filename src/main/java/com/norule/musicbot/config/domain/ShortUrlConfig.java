@@ -100,6 +100,8 @@ public final class ShortUrlConfig {
     private final boolean allowDateDefaultPassword;
     private final int minPasswordLength;
     private final int maxPasswordLength;
+    private final String quotaHmacSecret;
+    private final String deviceHmacSecret;
 
     public ShortUrlConfig(boolean enabled,
                           String bindHost,
@@ -160,6 +162,8 @@ public final class ShortUrlConfig {
         this.allowDateDefaultPassword = true;
         this.minPasswordLength = 4;
         this.maxPasswordLength = 128;
+        this.quotaHmacSecret = "";
+        this.deviceHmacSecret = "";
     }
 
     public ShortUrlConfig(BotConfig.ShortUrl config) {
@@ -222,6 +226,8 @@ public final class ShortUrlConfig {
         this.allowDateDefaultPassword = password.isAllowDateDefaultPassword();
         this.minPasswordLength = password.getMinPasswordLength();
         this.maxPasswordLength = password.getMaxPasswordLength();
+        this.quotaHmacSecret = abuse.getSecrets().getQuotaHmacSecret();
+        this.deviceHmacSecret = abuse.getSecrets().getDeviceHmacSecret();
     }
 
     public ShortUrlService.Options toOptions() {
@@ -276,6 +282,8 @@ public final class ShortUrlConfig {
     public String getTemporaryStoragePath() { return temporaryStoragePath; }
     public String getExpiredArchivePath() { return expiredArchivePath; }
     public int getFilesystemStopPercent() { return filesystemStopPercent; }
+    public String getQuotaHmacSecret() { return quotaHmacSecret; }
+    public String getDeviceHmacSecret() { return deviceHmacSecret; }
 
     private static String normalizeStorage(String storage) {
         return storage == null ? "sqlite" : storage.trim().toLowerCase(Locale.ROOT);
