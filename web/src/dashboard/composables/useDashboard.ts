@@ -294,6 +294,28 @@ function createDashboardStore() {
     }
   }
 
+  async function loadInitialSettings() {
+    if (!state.selectedGuildId) return
+    const guildId = state.selectedGuildId
+    const section = state.currentTab
+    state.loadingSection = true
+    try {
+      const data = await dashboardApi<Partial<DashboardSettings>>(`/api/guild/${guildId}/settings`)
+      if (guildId !== state.selectedGuildId) return
+      mergeSettings(data)
+      state.loadedSections.add(section)
+      markClean(section)
+      applyLanguageDefaults()
+      setStatus(i18n.t('settingsLoaded', '設定已載入'))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '載入設定失敗'
+      setStatus(message)
+      toast(message, 'error')
+    } finally {
+      if (guildId === state.selectedGuildId) state.loadingSection = false
+    }
+  }
+
   async function initialize() {
     if (state.initialized) return
     await i18n.initializeI18n()
@@ -370,7 +392,7 @@ function createDashboardStore() {
     url.searchParams.set('guild', guildId)
     history.replaceState(null, '', url)
     await loadGuildMetadata().catch((error: Error) => setStatus(error.message))
-    await loadSection(state.currentTab, true)
+    await loadInitialSettings()
     state.guildDirectoryOpen = false
   }
 

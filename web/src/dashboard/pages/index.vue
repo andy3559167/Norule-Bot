@@ -37,10 +37,10 @@ const tabMeta: Record<DashboardTab, { title: string; description: string }> = {
 
 const activeMeta = computed(() => tabMeta[dashboard.state.currentTab])
 const activeComponent = computed(() => components[dashboard.state.currentTab])
-const enabledModuleCount = computed(() => [
+const configurableSectionCount = Object.keys(tabMeta).length
+const enabledFeatureCount = computed(() => [
   dashboard.state.settings.notifications.enabled,
   dashboard.state.settings.messageLogs.enabled,
-  dashboard.state.settings.music.autoplayEnabled,
   dashboard.state.settings.privateRoom.enabled,
   dashboard.state.settings.welcome.enabled,
   dashboard.state.settings.numberChain.enabled,
@@ -111,7 +111,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', dashboard.befor
             <section class="nr-status-card">
               <div class="nr-bot-avatar"><img v-if="dashboard.state.bot?.avatarUrl" :src="dashboard.state.bot.avatarUrl" :alt="dashboard.state.bot.username" referrerpolicy="no-referrer"><template v-else>N</template><i /></div>
               <div class="nr-bot-info"><div><h3>{{ dashboard.state.bot?.username || 'NoRule Bot' }}</h3><span>● 運作正常</span></div><p>已連線至 {{ dashboard.currentGuild.value?.name }}，可使用控制面板管理現有模組設定。</p></div>
-              <div class="nr-status-stats"><div><small>伺服器</small><strong>1 <em>個</em></strong></div><div><small>可設定模組</small><strong>8 <em>項</em></strong></div><div><small>目前啟用</small><strong>{{ enabledModuleCount }} <em>項</em></strong></div></div>
+              <div class="nr-status-stats"><div><small>可管理伺服器</small><strong>{{ dashboard.manageableGuilds.value.length }} <em>個</em></strong></div><div><small>設定分類</small><strong>{{ configurableSectionCount }} <em>項</em></strong></div><div><small>啟用中功能</small><strong>{{ enabledFeatureCount }} <em>項</em></strong></div></div>
             </section>
 
             <section v-if="dashboard.state.atHome" class="nr-quick-area">
