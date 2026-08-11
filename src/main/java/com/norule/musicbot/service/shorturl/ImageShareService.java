@@ -428,16 +428,16 @@ public final class ImageShareService {
         }
     }
 
-    public void cleanupExpired() {
+    public synchronized void cleanupExpired() {
         long now = clock.millis();
         List<ImageShare> expired = imageRepository.findExpired(now);
         for (ImageShare imageShare : expired) {
             if (imageShare.storageState() == MediaStorageState.ACTIVE) {
-                retireExpiredShare(imageShare, now);
+                markArchivePending(imageShare, now);
             }
         }
         retryPendingArchives(now);
-        reconcileArchivedMedia();
+        reconcileArchivedMedia(now);
         lastCleanupAt = now;
     }
 
@@ -511,18 +511,27 @@ public final class ImageShareService {
     }
 
     private void retireExpiredShare(ImageShare imageShare, long now) {
+        ImageShare pending = markArchivePending(imageShare, now);
+        if (pending != null) {
+            archivePendingShare(pending, now);
+        }
+    }
+
+    private ImageShare markArchivePending(ImageShare imageShare, long now) {
         if (imageShare == null || imageShare.expiresAt() > now
                 || imageShare.storageState() == MediaStorageState.ARCHIVED
-                || imageShare.storageState() == MediaStorageState.ARCHIVE_DELETED) {
-            return;
+                || imageShare.storageState() == MediaStorageState.ARCHIVE_DELETED
+                || imageShare.storageState() == MediaStorageState.MISSING) {
+            return null;
         }
         ImageShare pending = imageShare.storageState() == MediaStorageState.ARCHIVE_PENDING
                 ? imageShare
-                : imageShare.withStorageState(MediaStorageState.ARCHIVE_PENDING, "", 0L);
+                : imageShare.withStorageState(MediaStorageState.ARCHIVE_PENDING,
+                imageShare.archiveStorageName(), imageShare.archivedAt());
         if (pending != imageShare) {
             imageRepository.update(pending);
         }
-        archivePendingShare(pending, now);
+        return pending;
     }
 
     private void retryPendingArchives(long now) {
@@ -534,20 +543,44 @@ public final class ImageShareService {
 
     private void archivePendingShare(ImageShare pending, long now) {
         try {
-            String archiveName = storage.archive(pending);
+            ImageShareStorage.ArchiveResult result = storage.archiveOrReconcile(pending);
+            if (result.status() == ImageShareStorage.ArchiveStatus.MISSING) {
+                imageRepository.update(pending.withStorageState(MediaStorageState.MISSING, "", 0L));
+                logMissingMedia(pending, MediaStorageState.MISSING);
+                return;
+            }
+            long archivedAt = pending.archivedAt() > 0L ? pending.archivedAt() : now;
             imageRepository.update(pending.withStorageState(
-                    MediaStorageState.ARCHIVED, archiveName, now));
+                    MediaStorageState.ARCHIVED, result.archiveStorageName(), archivedAt));
+            logArchiveReconciliation(pending, result.status());
         } catch (Exception exception) {
             logArchiveFailure(pending, exception);
         }
     }
 
-    private void reconcileArchivedMedia() {
+    private void reconcileArchivedMedia(long now) {
         for (ImageShare archived : imageRepository.findByStorageStates(
                 Set.of(MediaStorageState.ARCHIVED))) {
-            if (!storage.existsArchived(archived)) {
-                imageRepository.update(archived.withStorageState(
-                        MediaStorageState.ARCHIVE_DELETED, archived.archiveStorageName(), archived.archivedAt()));
+            try {
+                ImageShareStorage.ArchiveResult result = storage.archiveOrReconcile(archived);
+                if (result.status() == ImageShareStorage.ArchiveStatus.MISSING) {
+                    imageRepository.update(archived.withStorageState(
+                            MediaStorageState.ARCHIVE_DELETED,
+                            archived.archiveStorageName(), archived.archivedAt()));
+                    logMissingMedia(archived, MediaStorageState.ARCHIVE_DELETED);
+                    continue;
+                }
+                long archivedAt = archived.archivedAt() > 0L ? archived.archivedAt() : now;
+                if (!result.archiveStorageName().equals(archived.archiveStorageName())
+                        || archived.archivedAt() <= 0L) {
+                    imageRepository.update(archived.withStorageState(
+                            MediaStorageState.ARCHIVED, result.archiveStorageName(), archivedAt));
+                }
+                if (result.status() == ImageShareStorage.ArchiveStatus.LEGACY_MIGRATED) {
+                    logArchiveReconciliation(archived, result.status());
+                }
+            } catch (Exception exception) {
+                logArchiveFailure(archived, exception);
             }
         }
     }
@@ -571,6 +604,22 @@ public final class ImageShareService {
         System.err.println("[NoRule] Failed to archive expired short-url media " + imageShare.code() + ": "
                 + exception.getClass().getSimpleName()
                 + (detail == null || detail.isBlank() ? "" : " - " + detail));
+    }
+
+    private void logArchiveReconciliation(ImageShare imageShare, ImageShareStorage.ArchiveStatus status) {
+        if (status == ImageShareStorage.ArchiveStatus.ALREADY_ARCHIVED) {
+            System.out.println("[NoRule] Reconciled expired short-url media " + imageShare.code()
+                    + ": archive file already exists; metadata marked ARCHIVED");
+        } else if (status == ImageShareStorage.ArchiveStatus.LEGACY_MIGRATED) {
+            System.out.println("[NoRule] Migrated expired short-url media " + imageShare.code()
+                    + " from legacy storage; metadata marked ARCHIVED");
+        }
+    }
+
+    private void logMissingMedia(ImageShare imageShare, MediaStorageState terminalState) {
+        System.err.println("[NoRule] Expired short-url media " + imageShare.code()
+                + " is missing from active, archive, and legacy storage; metadata marked "
+                + terminalState.name());
     }
 
     private UploadError mapQuotaRejection(MediaQuotaService.Rejection rejection) {

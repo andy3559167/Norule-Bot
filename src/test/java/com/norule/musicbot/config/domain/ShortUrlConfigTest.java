@@ -74,6 +74,24 @@ class ShortUrlConfigTest {
                 )
         ), BotConfig.ShortUrl.defaultValues());
 
-        assertEquals("data/custom-active", new ShortUrlConfig(parsed).getImage().getStoragePath());
+        ShortUrlConfig config = new ShortUrlConfig(parsed);
+        assertEquals("data/custom-active", config.getImage().getStoragePath());
+        assertEquals("data/custom-active", config.getLegacyImageStoragePath());
+    }
+
+    @Test
+    void exposesLegacyStoragePathWhenNestedActivePathMoves() {
+        BotConfig.ShortUrl parsed = BotConfig.ShortUrl.fromMap(Map.of(
+                "image", Map.of(
+                        "storagePath", "data/old-active",
+                        "abuseProtection", Map.of(
+                                "storage", Map.of("activePath", "data/new-active")
+                        )
+                )
+        ), BotConfig.ShortUrl.defaultValues());
+
+        ShortUrlConfig config = new ShortUrlConfig(parsed);
+        assertEquals("data/new-active", config.getImage().getStoragePath());
+        assertEquals("data/old-active", config.getLegacyImageStoragePath());
     }
 }

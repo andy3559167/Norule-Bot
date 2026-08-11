@@ -4,5 +4,6 @@ public enum MediaStorageState {
     ACTIVE,
     ARCHIVE_PENDING,
     ARCHIVED,
-    ARCHIVE_DELETED
+    ARCHIVE_DELETED,
+    MISSING
 }

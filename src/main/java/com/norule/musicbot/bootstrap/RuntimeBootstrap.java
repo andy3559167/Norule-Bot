@@ -1037,7 +1037,8 @@ public final class RuntimeBootstrap {
         FileSystemImageShareStorage storage = new FileSystemImageShareStorage(
                 resolveDataPath(baseDir, config.getImage().getStoragePath()),
                 resolveDataPath(baseDir, config.getTemporaryStoragePath()),
-                resolveDataPath(baseDir, config.getExpiredArchivePath())
+                resolveDataPath(baseDir, config.getExpiredArchivePath()),
+                List.of(resolveDataPath(baseDir, config.getLegacyImageStoragePath()))
         );
         MediaPasswordAttemptGuard passwordGuard = new MediaPasswordAttemptGuard(
                 securityRepository,
@@ -1046,9 +1047,11 @@ public final class RuntimeBootstrap {
         );
         MediaQuotaService quotaService = new MediaQuotaService(
                 securityRepository, config.getMediaQuotaOptions());
-        return new ImageShareService(imageRepository, shortUrlRepository, storage,
+        ImageShareService service = new ImageShareService(imageRepository, shortUrlRepository, storage,
                 config.toImageShareOptions(), java.time.Clock.systemUTC(),
                 new ImageShareService.SecurityDependencies(passwordGuard, quotaService));
+        service.cleanupExpired();
+        return service;
     }
 
     private static ShortUrlRepository createShortUrlRepository(ShortUrlConfig config, Path baseDir) {
