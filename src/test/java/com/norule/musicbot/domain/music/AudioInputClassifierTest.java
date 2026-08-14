@@ -29,6 +29,10 @@ class AudioInputClassifierTest {
                 classifier.classify("https://www.youtube.com/watch?v=5MSYOqQ8dNc").type());
         assertEquals(AudioInputClassifier.AudioInputType.KNOWN_AUDIO_SERVICE_URL,
                 classifier.classify("https://soundcloud.com/artist/track").type());
+        assertEquals(AudioInputClassifier.AudioInputType.BILIBILI_URL,
+                classifier.classify("https://www.bilibili.com/video/BV1xx411c7mD?p=2").type());
+        assertEquals(AudioInputClassifier.AudioInputType.BILIBILI_URL,
+                classifier.classify("https://b23.tv/AbCd123").type());
         assertEquals(AudioInputClassifier.AudioInputType.SEARCH_QUERY,
                 classifier.classify("long form audiobook").type());
     }
@@ -47,6 +51,8 @@ class AudioInputClassifierTest {
                 classifier.classify("https://youtube.com.example.com/watch?v=abc").type());
         assertEquals(AudioInputClassifier.AudioInputType.UNSUPPORTED_URL,
                 classifier.classify("https://open.spotify.com.example.com/track/abc").type());
+        assertEquals(AudioInputClassifier.AudioInputType.UNSUPPORTED_URL,
+                classifier.classify("https://bilibili.com.example.com/video/BV1xx411c7mD").type());
     }
 
     @Test

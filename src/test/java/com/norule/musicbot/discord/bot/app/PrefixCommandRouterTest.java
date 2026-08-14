@@ -1,0 +1,43 @@
+package com.norule.musicbot.discord.bot.app;
+
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+
+class PrefixCommandRouterTest {
+    private static final String BILIBILI_URL = "https://www.bilibili.com/video/BV1wZMy6DE31/";
+
+    @Test
+    void acceptsDollarPAsQuickPlayRegardlessOfConfiguredPrefix() {
+        PrefixCommandRouter.PrefixInvocation invocation =
+                PrefixCommandRouter.parseInvocation("$p " + BILIBILI_URL, "&&");
+
+        assertEquals("play", invocation.command());
+        assertEquals(BILIBILI_URL, invocation.argument());
+    }
+
+    @Test
+    void acceptsPAsAliasWithConfiguredPrefix() {
+        PrefixCommandRouter.PrefixInvocation invocation =
+                PrefixCommandRouter.parseInvocation("&&P " + BILIBILI_URL, "&&");
+
+        assertEquals("play", invocation.command());
+        assertEquals(BILIBILI_URL, invocation.argument());
+    }
+
+    @Test
+    void preservesExistingPrefixCommands() {
+        PrefixCommandRouter.PrefixInvocation invocation =
+                PrefixCommandRouter.parseInvocation("&&play song name", "&&");
+
+        assertEquals("play", invocation.command());
+        assertEquals("song name", invocation.argument());
+    }
+
+    @Test
+    void doesNotTreatOtherDollarCommandsOrMissingBoundaryAsQuickPlay() {
+        assertNull(PrefixCommandRouter.parseInvocation("$playlist demo", "&&"));
+        assertNull(PrefixCommandRouter.parseInvocation("$phttps://example.com/audio.mp3", "&&"));
+    }
+}

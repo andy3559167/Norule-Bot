@@ -45,6 +45,7 @@ public final class AudioInputClassifier {
         SPOTIFY_ARTIST,
         SPOTIFY_EPISODE,
         SPOTIFY_SHOW,
+        BILIBILI_URL,
         KNOWN_AUDIO_SERVICE_URL,
         DIRECT_HTTP_AUDIO,
         UNSUPPORTED_URL,
@@ -95,6 +96,9 @@ public final class AudioInputClassifier {
         String lowerHost = host.toLowerCase(Locale.ROOT);
         if (isYouTubeHost(lowerHost)) {
             return new Classification(AudioInputType.YOUTUBE_URL, normalized, uri);
+        }
+        if (isBilibiliHost(lowerHost)) {
+            return new Classification(AudioInputType.BILIBILI_URL, normalized, uri);
         }
         if (isKnownAudioServiceHost(lowerHost)) {
             return new Classification(AudioInputType.KNOWN_AUDIO_SERVICE_URL, normalized, uri);
@@ -169,6 +173,14 @@ public final class AudioInputClassifier {
                 || host.endsWith(".vimeo.com")
                 || host.endsWith(".twitch.tv")
                 || host.endsWith(".nicovideo.jp");
+    }
+
+    private boolean isBilibiliHost(String host) {
+        return "bilibili.com".equals(host)
+                || "www.bilibili.com".equals(host)
+                || "m.bilibili.com".equals(host)
+                || "b23.tv".equals(host)
+                || "www.b23.tv".equals(host);
     }
 
     private boolean hasDirectAudioExtension(String rawPath) {

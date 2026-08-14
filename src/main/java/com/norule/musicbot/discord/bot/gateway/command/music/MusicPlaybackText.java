@@ -27,6 +27,9 @@ public final class MusicPlaybackText {
         if (uri.contains("soundcloud.com")) {
             return "soundcloud";
         }
+        if (uri.contains("bilibili.com") || uri.contains("b23.tv")) {
+            return "bilibili";
+        }
         return "url";
     }
 

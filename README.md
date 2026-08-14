@@ -18,7 +18,7 @@ NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人�
 
 ### 音樂播放
 
-- 支援 YouTube 關鍵字 / URL、Spotify 連結轉搜尋、SoundCloud 與一般 URL。
+- 支援 YouTube 關鍵字 / URL、Bilibili 影片與 `b23.tv` 短網址、Spotify 連結轉搜尋、SoundCloud 與一般 URL。
 - 支援加入語音、播放、跳過、停止、離開、音量、循環模式與播放佇列。
 - 支援播放歷史、熱門歌曲、熱門點歌者、今日播放時間與統計資料。
 - 支援互動式音樂控制面板。
@@ -166,6 +166,7 @@ NoRule Bot 是以 Java 21 LTS + JDA 製作的 Discord 多功能社群機器人�
 - `!help`
 - `!join`
 - `!play <關鍵字或URL>`
+- `$p <Bilibili URL>`：快速播放 Bilibili 網址，不受 `prefix` 設定影響；也可使用 `<prefix>p <URL>`。
 - `!volume <1-100>`
 - `!history`
 - `!music`

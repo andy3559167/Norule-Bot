@@ -15,6 +15,7 @@ import com.sedmelluq.discord.lavaplayer.tools.FriendlyException;
 import com.sedmelluq.discord.lavaplayer.track.AudioPlaylist;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrack;
 import com.sedmelluq.discord.lavaplayer.track.AudioTrackInfo;
+import dev.lavalink.bilibili.BilibiliAudioSourceManager;
 import dev.lavalink.youtube.YoutubeAudioSourceManager;
 import dev.lavalink.youtube.YoutubeSourceOptions;
 import dev.lavalink.youtube.clients.AndroidMusicWithThumbnail;
@@ -105,6 +106,7 @@ public class MusicPlayerService {
     private static final int YOUTUBE_PLAYLIST_BATCH_SIZE = 25;
 
     private final AudioPlayerManager playerManager;
+    private final BilibiliAudioSourceManager bilibiliSourceManager;
     private final MusicDataService musicDataService;
     private final SpotifyPlaylistInspector spotifyPlaylistInspector;
     private final AudioInputClassifier inputClassifier = new AudioInputClassifier();
@@ -196,6 +198,10 @@ public class MusicPlayerService {
         );
         playerManager = new DefaultAudioPlayerManager();
         playerManager.setTrackStuckThreshold(recoveryConfig.getStuckThresholdMillis());
+        this.bilibiliSourceManager = new BilibiliAudioSourceManager();
+        updateBilibiliPlaylistLimit();
+        playerManager.registerSourceManager(bilibiliSourceManager);
+        LOGGER.info("[NoRule] Bilibili audio source registered.");
         YoutubeAuthRuntime youtubeAuth = configureYouTubePoToken(resolveYoutubeAuthentication());
         YoutubeAudioSourceManager youtubeSourceManager = createYoutubeSourceManager(youtubeAuth.mode());
         youtubeAuth = configureYouTubeOauth(youtubeSourceManager, youtubeAuth);
@@ -224,6 +230,11 @@ public class MusicPlayerService {
                 recoveryConfig.getResumeRewindMillis()
         );
         playerManager.setTrackStuckThreshold(recoveryConfig.getStuckThresholdMillis());
+        updateBilibiliPlaylistLimit();
+    }
+
+    private void updateBilibiliPlaylistLimit() {
+        bilibiliSourceManager.setPlaylistPageCount(Math.max(1, Math.ceilDiv(playlistTrackLimit, 100)));
     }
 
     public void cleanupTransientCaches(long nowMillis) {
@@ -2491,6 +2502,13 @@ public class MusicPlayerService {
     }
 
     private String resolveRecoveryIdentifier(AudioTrack track, String fallback) {
+        AudioSourceManager sourceManager = track == null ? null : track.getSourceManager();
+        if (sourceManager != null
+                && "bilibili".equalsIgnoreCase(sourceManager.getSourceName())
+                && fallback != null
+                && !fallback.isBlank()) {
+            return fallback;
+        }
         if (track != null && track.getIdentifier() != null && !track.getIdentifier().isBlank()) {
             return track.getIdentifier();
         }
@@ -2646,6 +2664,9 @@ public class MusicPlayerService {
                 return new ResolvedInput(strictPlaylistUrl, true, "youtube");
             }
             return new ResolvedInput(normalized, true, "youtube");
+        }
+        if (classification.type() == AudioInputClassifier.AudioInputType.BILIBILI_URL) {
+            return new ResolvedInput(trimmed, true, "bilibili");
         }
         if (classification.type() == AudioInputClassifier.AudioInputType.KNOWN_AUDIO_SERVICE_URL) {
             return new ResolvedInput(trimmed, true, detectKnownServiceSource(classification.uri()));

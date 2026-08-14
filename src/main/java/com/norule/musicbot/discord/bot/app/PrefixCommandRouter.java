@@ -6,6 +6,7 @@ import com.norule.musicbot.discord.bot.gateway.command.CommandNames;
 import net.dv8tion.jda.api.entities.Guild;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 
+import java.util.Locale;
 import java.util.Map;
 
 class PrefixCommandRouter {
@@ -29,12 +30,12 @@ class PrefixCommandRouter {
             return;
         }
         RuntimeConfigSnapshot snapshot = service.runtimeConfigSnapshot();
-        if (!raw.startsWith(snapshot.getPrefix())) {
+        PrefixInvocation invocation = parseInvocation(raw, snapshot.getPrefix());
+        if (invocation == null) {
             return;
         }
-        String[] split = raw.substring(snapshot.getPrefix().length()).trim().split("\\s+", 2);
-        String cmd = split.length > 0 ? split[0].toLowerCase() : "";
-        String arg = split.length > 1 ? split[1].trim() : "";
+        String cmd = invocation.command();
+        String arg = invocation.argument();
         String lang = service.lang(guild.getIdLong());
 
         if (isKnownPrefixCommand(cmd)) {
@@ -62,8 +63,39 @@ class PrefixCommandRouter {
             default -> event.getChannel().sendMessage(service.i18nService().t(lang, KEY_UNKNOWN_COMMAND)).queue();
         }
         if (isKnownPrefixCommand(cmd)) {
-            service.logCommandUsage(guild, event.getMember(), snapshot.getPrefix() + cmd + (arg.isBlank() ? "" : " " + arg), event.getChannel().getIdLong());
+            service.logCommandUsage(guild, event.getMember(), raw.trim(), event.getChannel().getIdLong());
         }
+    }
+
+    static PrefixInvocation parseInvocation(String raw, String configuredPrefix) {
+        if (raw == null) {
+            return null;
+        }
+        String commandBody;
+        if (configuredPrefix != null && !configuredPrefix.isEmpty() && raw.startsWith(configuredPrefix)) {
+            commandBody = raw.substring(configuredPrefix.length());
+        } else if (isDollarPlayInvocation(raw)) {
+            commandBody = raw.substring(1);
+        } else {
+            return null;
+        }
+        String[] split = commandBody.trim().split("\\s+", 2);
+        String command = split.length > 0 ? split[0].toLowerCase(Locale.ROOT) : "";
+        if ("p".equals(command)) {
+            command = CommandNames.CMD_PLAY;
+        }
+        String argument = split.length > 1 ? split[1].trim() : "";
+        return new PrefixInvocation(command, argument);
+    }
+
+    private static boolean isDollarPlayInvocation(String raw) {
+        return raw.length() >= 2
+                && raw.charAt(0) == '$'
+                && Character.toLowerCase(raw.charAt(1)) == 'p'
+                && (raw.length() == 2 || Character.isWhitespace(raw.charAt(2)));
+    }
+
+    record PrefixInvocation(String command, String argument) {
     }
 
     private boolean isKnownPrefixCommand(String cmd) {
